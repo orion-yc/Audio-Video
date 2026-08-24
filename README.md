@@ -66,13 +66,13 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.1
+.\packaging\build-release.ps1 -Version 1.0.2
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist`:
 
-- `Audio-Video-Setup-1.0.1.exe`
-- `Audio-Video-Portable-1.0.1.zip`
+- `Audio-Video-Setup-1.0.2.exe`
+- `Audio-Video-Portable-1.0.2.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 

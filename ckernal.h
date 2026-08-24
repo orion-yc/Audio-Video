@@ -135,7 +135,13 @@ public slots:
     void slot_latencyError(QAbstractSocket::SocketError error);
     void slot_latencyTimeout();
     void slot_loginTimeout();
-    void slot_mainDisconnected();
+    void slot_controlConnected();
+    void slot_controlReadyRead();
+    void slot_controlDisconnected();
+    void slot_controlError(QAbstractSocket::SocketError error);
+    void slot_controlReconnect();
+    void slot_dealAudioChannelData(uint socket, char* buf, int nlen);
+    void slot_dealVideoChannelData(uint socket, char* buf, int nlen);
 
 
 private:
@@ -163,16 +169,32 @@ private:
     void beginRoomRequest(RoomRequest request, int roomId = 0);
     void clearRoomRequest();
     void slot_roomRequestTimeout();
+    bool hasAuthenticatedControlConnection() const;
+    bool sendControlPacket(const char* data, int length, bool requiresLogin = true);
+    bool writeControlFrame(const char* data, int length);
+    bool queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
+                           const QByteArray& avatarData, bool avatarChanged);
+    void ensureControlConnection();
+    void sendPendingLogin();
+    void sendPendingRegistration();
+    void resetAuthenticationState();
+    void beginControlRecovery();
+    void scheduleControlReconnect();
+    void clearPendingProfileSave();
 
     PFUN                            m_netMap[DEF_PACK_COUNT];
     LoginDialog*                    m_loginDialog;
     demoDialog*                     m_demoDialog;
-    INetMediator*                   m_client;
+    QTcpSocket*                     m_controlSocket;
+    QByteArray                      m_controlReceiveBuffer;
+    QTimer*                         m_controlReconnectTimer;
     QString                         m_serverIP;
     unsigned short                  m_serverPort;
     int                             m_userid;
     int                             m_roomid;
     char                            m_sessionToken[SESSION_TOKEN_SIZE];
+    bool                            m_loggedIn;
+    bool                            m_shuttingDown;
     RoomDialog*                     m_roomDialog;
     QString                         m_name;
     int                             m_userIconId;
@@ -206,6 +228,11 @@ private:
     bool                            m_latencyProbeActive;
     bool                            m_loginPending;
     QString                         m_loginTel;
+    QByteArray                      m_loginRequest;
+    QByteArray                      m_pendingRegisterRequest;
+    bool                            m_profileSavePending;
+    QByteArray                      m_pendingProfileAvatarData;
+    bool                            m_pendingProfileAvatarChanged;
     QString                         m_registerDraftTel;
     QString                         m_registerDraftPassword;
     QString                         m_registerDraftNickname;

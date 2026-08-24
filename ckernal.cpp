@@ -126,7 +126,10 @@ static std::string GetMD5(QString str)
 
 
 CKernal::CKernal(QObject *parent) : QObject(parent)
-  ,m_userid(0), m_roomid(0), m_userIconId(0), m_sendVideoThread(new SendThread)
+  ,m_controlSocket(new QTcpSocket(this))
+  ,m_controlReconnectTimer(new QTimer(this))
+  ,m_userid(0), m_roomid(0), m_loggedIn(false), m_shuttingDown(false)
+  ,m_userIconId(0), m_sendVideoThread(new SendThread)
   ,m_videoEncodeThread(new VideoEncodeThread)
   ,m_videoEncodeBusy(false)
   ,m_videoStreamGeneration(0)
@@ -138,6 +141,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     ,m_roomRequestTimer(new QTimer(this))
     ,m_latencyProbeActive(false)
     ,m_loginPending(false)
+    ,m_profileSavePending(false)
+    ,m_pendingProfileAvatarChanged(false)
     ,m_registerDraftIconId(0)
     ,m_registerDraftAvatarChanged(false)
     ,m_pendingRegistrationIconId(0)
@@ -152,13 +157,6 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
 
     m_loginDialog = new LoginDialog;
     m_demoDialog  = new demoDialog;
-
-    m_client      = new TcpClientMediator;
-    connect(m_client, SIGNAL(SIG_ReadyData(uint,char*,int))
-            , this, SLOT(slot_dealData(uint,char*,int)));
-    connect(m_client, &INetMediator::SIG_disConnect,
-            this, &CKernal::slot_mainDisconnected);
-
 
     connect(m_loginDialog, SIGNAL(SIG_close()),
             this, SLOT(slot_destroy()));
@@ -182,14 +180,31 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     connect(m_demoDialog, SIGNAL(SIG_setUser()),
             this, SLOT(slot_setUser()));
 
-    m_client->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort);
+    connect(m_controlSocket, &QTcpSocket::connected,
+            this, &CKernal::slot_controlConnected);
+    connect(m_controlSocket, &QTcpSocket::readyRead,
+            this, &CKernal::slot_controlReadyRead);
+    connect(m_controlSocket, &QTcpSocket::disconnected,
+            this, &CKernal::slot_controlDisconnected);
+    connect(m_controlSocket, &QTcpSocket::errorOccurred,
+            this, &CKernal::slot_controlError);
+    m_controlReconnectTimer->setSingleShot(true);
+    m_controlReconnectTimer->setInterval(1500);
+    connect(m_controlReconnectTimer, &QTimer::timeout,
+            this, &CKernal::slot_controlReconnect);
+    ensureControlConnection();
 
     // 构造里面av连接
     for(int i = 0 ; i < 2; ++i)
     {
         m_tcpAV[i]  = new TcpClientMediator;
-        connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int))
-                , this, SLOT(slot_dealData(uint,char*,int)));
+        if (i == 0) {
+            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+                    this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
+        } else {
+            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+                    this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
+        }
 
         m_tcpAV[i]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort);
     }
@@ -203,15 +218,6 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     // todo
     connect(m_setUserDialog, &SetUserDialog::SIG_userSetCommit,
             this, &CKernal::slot_userSetCommit);
-
-
-
-    // 测试 登录 验证与服务器的链接
-    //    STRU_LOGIN_RQ rq;
-    //    strcpy( rq.tel , "123");
-    //    strcpy( rq.password, "123");
-
-    //    m_client->SendData( 0 , (char*)&rq, sizeof(rq));
 
     m_audioRead = new Audio_Read;
 
@@ -301,15 +307,18 @@ CKernal::~CKernal()
 void CKernal::slot_destroy()
 {
     qDebug() <<  __func__;
+    m_shuttingDown = true;
     m_latencyTimer->stop();
     m_latencyTimeoutTimer->stop();
     m_loginTimeoutTimer->stop();
     m_roomRequestTimer->stop();
+    m_controlReconnectTimer->stop();
     m_latencyProbeActive = false;
     m_loginPending = false;
     m_roomRequest = RoomRequest::None;
     m_pendingRoomId = 0;
     m_latencySocket->abort();
+    m_controlSocket->abort();
     if(m_loginDialog){
         m_loginDialog->hide();  // 不写close。不然会触发关闭时间会死循环
         delete m_loginDialog; m_loginDialog = NULL;
@@ -336,11 +345,6 @@ void CKernal::slot_destroy()
         delete m_deskRead; m_deskRead = NULL;
     }
     m_videoEncodeThread.reset();
-    if(m_client){
-        m_client->CloseNet();
-        delete m_client; m_client = NULL;
-    }
-
 }
 
 void CKernal::slot_measureLatency()
@@ -414,32 +418,111 @@ void CKernal::slot_loginTimeout()
         return;
     }
 
-    m_loginPending = false;
-    if (m_loginDialog) {
-        m_loginDialog->slot_setLoginPending(false);
-        QMessageBox::warning(m_loginDialog, "提示",
-                             "登录超时，服务器没有返回结果，请重试");
+    // A stale control connection must be replaced before sending the cached
+    // login request again. Keep the pending state so recovery can continue.
+    if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+        m_controlSocket->abort();
+    } else {
+        scheduleControlReconnect();
     }
 }
 
-void CKernal::slot_mainDisconnected()
+void CKernal::slot_controlConnected()
 {
-    if (m_roomRequest != RoomRequest::None) {
-        clearRoomRequest();
-        m_demoDialog->slot_setPushButton_enable(true);
-        QMessageBox::warning(m_demoDialog, "提示", "房间请求连接已断开，请重试");
-    }
-
-    if (!m_loginPending) {
+    if (m_shuttingDown) {
         return;
     }
 
-    m_loginTimeoutTimer->stop();
-    m_loginPending = false;
-    if (m_loginDialog) {
-        m_loginDialog->slot_setLoginPending(false);
-        QMessageBox::warning(m_loginDialog, "提示",
-                             "登录连接已断开，请重试");
+    m_controlReconnectTimer->stop();
+    if (m_loginPending) {
+        sendPendingLogin();
+    } else {
+        sendPendingRegistration();
+    }
+}
+
+void CKernal::slot_controlReadyRead()
+{
+    m_controlReceiveBuffer.append(m_controlSocket->readAll());
+
+    while (m_controlReceiveBuffer.size() >= static_cast<int>(sizeof(int))) {
+        int payloadLength = 0;
+        memcpy(&payloadLength, m_controlReceiveBuffer.constData(), sizeof(payloadLength));
+        if (payloadLength < static_cast<int>(sizeof(PackType)) ||
+                payloadLength > _DEF_MAX_PACKET_SIZE) {
+            qWarning() << "Invalid control frame length:" << payloadLength;
+            m_controlReceiveBuffer.clear();
+            m_controlSocket->abort();
+            return;
+        }
+
+        const int frameLength = static_cast<int>(sizeof(int)) + payloadLength;
+        if (m_controlReceiveBuffer.size() < frameLength) {
+            return;
+        }
+
+        char* packet = new char[payloadLength];
+        memcpy(packet, m_controlReceiveBuffer.constData() + sizeof(int), payloadLength);
+        m_controlReceiveBuffer.remove(0, frameLength);
+        slot_dealData(0, packet, payloadLength);
+    }
+}
+
+void CKernal::slot_controlDisconnected()
+{
+    if (m_shuttingDown) {
+        return;
+    }
+    beginControlRecovery();
+}
+
+void CKernal::slot_controlError(QAbstractSocket::SocketError error)
+{
+    Q_UNUSED(error);
+    if (m_shuttingDown) {
+        return;
+    }
+    if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+        m_controlSocket->abort();
+        return;
+    }
+    beginControlRecovery();
+}
+
+void CKernal::slot_controlReconnect()
+{
+    if (!m_shuttingDown && !m_loggedIn && m_loginPending) {
+        ensureControlConnection();
+    }
+}
+
+void CKernal::slot_dealAudioChannelData(uint socket, char *buf, int nlen)
+{
+    if (!buf || nlen < static_cast<int>(sizeof(PackType))) {
+        delete[] buf;
+        return;
+    }
+    int type = 0;
+    memcpy(&type, buf, sizeof(type));
+    if (type == DEF_PACK_AUDIO_FRAME) {
+        slot_dealData(socket, buf, nlen);
+    } else {
+        delete[] buf;
+    }
+}
+
+void CKernal::slot_dealVideoChannelData(uint socket, char *buf, int nlen)
+{
+    if (!buf || nlen < static_cast<int>(sizeof(PackType))) {
+        delete[] buf;
+        return;
+    }
+    int type = 0;
+    memcpy(&type, buf, sizeof(type));
+    if (type == DEF_PACK_VIDEO_FRAME) {
+        slot_dealData(socket, buf, nlen);
+    } else {
+        delete[] buf;
     }
 }
 
@@ -451,7 +534,8 @@ void CKernal::slot_dealData(uint socket, char *buf, int nlen)
         return;
     }
     // 协议映射表
-    int type = *(int*)buf;
+    int type = 0;
+    memcpy(&type, buf, sizeof(type));
     if(type >= DEF_PACK_BASE && type < DEF_PACK_BASE + DEF_PACK_COUNT)
     {
         PFUN pf = NetMap(type);
@@ -466,7 +550,7 @@ void CKernal::slot_dealData(uint socket, char *buf, int nlen)
 // 登录回复处理
 void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 {
-    qDebug() <<  __func__;
+    Q_UNUSED(socket);
     const int loginResponseHeaderSize = 3 * static_cast<int>(sizeof(int));
     if (nlen < loginResponseHeaderSize) {
         return;
@@ -476,66 +560,62 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
     m_loginPending = false;
     m_loginDialog->slot_setLoginPending(false);
 
-    // The original server sends type/user id/result only. Newer servers append
-    // a session token, so parse the common header and use the token when present.
-    const int userid = *(reinterpret_cast<int*>(buf + sizeof(int)));
-    const int result = *(reinterpret_cast<int*>(buf + 2 * sizeof(int)));
+    int userid = 0;
+    int result = 0;
+    memcpy(&userid, buf + sizeof(int), sizeof(userid));
+    memcpy(&result, buf + 2 * sizeof(int), sizeof(result));
     const int tokenOffset = 3 * static_cast<int>(sizeof(int));
-    bool hasSessionToken = nlen >= tokenOffset + SESSION_TOKEN_SIZE;
-    // 根据结果，弹窗提示
-    switch (result) {
-    case user_not_exist:
+    if (result != login_success) {
+        resetAuthenticationState();
+        switch (result) {
+        case user_not_exist:
         QMessageBox::about( this->m_loginDialog, "提示" , "查无此人, 登陆失败");
         break;
-    case password_error:
+        case password_error:
         QMessageBox::about( this->m_loginDialog, "提示" , "密码错误，登录失败");
         break;
-    case login_success: {
-        // QMessageBox::about( this->m_loginDialog, "提示" , "注册成功");
-        qDebug() << "login_success";
-        // ui切换 存id
-        m_userid = userid;
-        memset(m_sessionToken, 0, sizeof(m_sessionToken));
-        if (hasSessionToken) {
-            memcpy(m_sessionToken, buf + tokenOffset, sizeof(m_sessionToken));
-            hasSessionToken = hasValidSessionToken(m_sessionToken);
-            if (!hasSessionToken) {
-                memset(m_sessionToken, 0, sizeof(m_sessionToken));
-            }
+        case server_error:
+            QMessageBox::warning(m_loginDialog, "提示", "服务器内部错误，请稍后重试");
+            break;
+        default:
+            QMessageBox::warning(m_loginDialog, "提示", "登录失败，请稍后重试");
+            break;
         }
-        m_loginDialog->hide();
-        m_demoDialog->showNormal();
-
-        // 注册视频和音频
-        if (hasSessionToken) {
-            STRU_AUDIO_REGISTER audiorq;
-            audiorq.m_userid = m_userid;
-            memcpy(audiorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
-            slot_clientAudioSendData(0, (char*)&audiorq, sizeof(audiorq));
-
-            STRU_VIDEO_REGISTER videorq;
-            videorq.m_userid = m_userid;
-            memcpy(videorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
-            slot_clientVideoSendData(0, (char*)&videorq, sizeof(videorq));
-        } else {
-            struct LegacyAvRegister {
-                PackType type;
-                int userid;
-            };
-            LegacyAvRegister audiorq = { DEF_PACK_AUDIO_REGISTER, m_userid };
-            LegacyAvRegister videorq = { DEF_PACK_VIDEO_REGISTER, m_userid };
-            slot_clientAudioSendData(0, reinterpret_cast<char*>(&audiorq),
-                                     sizeof(audiorq));
-            slot_clientVideoSendData(0, reinterpret_cast<char*>(&videorq),
-                                     sizeof(videorq));
-        }
-
-        break;
+        return;
     }
-    case server_error:
-        QMessageBox::warning(m_loginDialog, "提示", "服务器内部错误，请稍后重试");
-        break;
+
+    if (userid <= 0 || nlen < tokenOffset + SESSION_TOKEN_SIZE) {
+        resetAuthenticationState();
+        QMessageBox::warning(m_loginDialog, "提示", "服务器返回的登录会话无效，请重试");
+        return;
     }
+
+    char sessionToken[SESSION_TOKEN_SIZE] = {};
+    // Keep the NUL byte: the server validates all 33 bytes of this field.
+    memcpy(sessionToken, buf + tokenOffset, sizeof(sessionToken));
+    if (!hasValidSessionToken(sessionToken)) {
+        resetAuthenticationState();
+        QMessageBox::warning(m_loginDialog, "提示", "服务器返回的登录令牌无效，请重试");
+        return;
+    }
+
+    m_userid = userid;
+    memcpy(m_sessionToken, sessionToken, sizeof(m_sessionToken));
+    m_loggedIn = true;
+    m_loginDialog->hide();
+    m_demoDialog->showNormal();
+
+    // Audio and video have their own channels. They receive the same complete
+    // token only after the control connection has authenticated this user.
+    STRU_AUDIO_REGISTER audiorq;
+    audiorq.m_userid = m_userid;
+    memcpy(audiorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
+    slot_clientAudioSendData(0, reinterpret_cast<char*>(&audiorq), sizeof(audiorq));
+
+    STRU_VIDEO_REGISTER videorq;
+    videorq.m_userid = m_userid;
+    memcpy(videorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
+    slot_clientVideoSendData(0, reinterpret_cast<char*>(&videorq), sizeof(videorq));
 }
 
 // 注册回复处理
@@ -646,13 +726,21 @@ void CKernal::slot_dealRoomMemberRq(uint socket, char *buf, int nlen)
 
 void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
 {
+    Q_UNUSED(socket);
     if (nlen != static_cast<int>(sizeof(STRU_USER_INFO_RQ))) return;
-    // 拆包
-    STRU_USER_INFO_RQ* rq = (STRU_USER_INFO_RQ*)buf;
-    // 更新ui
+    STRU_USER_INFO_RQ* rq = reinterpret_cast<STRU_USER_INFO_RQ*>(buf);
+    if (!m_loggedIn || rq->m_UserID != m_userid) {
+        return;
+    }
+
     m_name = QString::fromStdString(rq->m_szUser);
     m_userIconId = qBound(0, rq->m_iconid, 35);
     const QString feeling = QString::fromStdString(rq->m_userFeeling);
+
+    m_demoDialog->slot_setInfo(m_name, m_userIconId);
+    m_setUserDialog->slot_setInfo(m_userIconId, m_name, feeling);
+    updateOwnRoomAvatar(m_userAvatar.isNull() ? builtInAvatar(m_userIconId)
+                                               : m_userAvatar);
 
     if (m_pendingRegistrationTel == m_loginTel &&
             (!m_pendingRegistrationNickname.isEmpty() ||
@@ -662,42 +750,35 @@ void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
         const int updatedIconId = m_pendingRegistrationAvatarChanged
                 ? m_pendingRegistrationIconId : m_userIconId;
 
-        STRU_USER_INFO_RQ update;
-        update.m_UserID = m_userid;
-        update.m_iconid = updatedIconId;
-        const QByteArray updatedNameUtf8 = updatedName.toUtf8();
-        const QByteArray feelingUtf8 = feeling.toUtf8();
-        strncpy(update.m_szUser, updatedNameUtf8.constData(), sizeof(update.m_szUser) - 1);
-        strncpy(update.m_userFeeling, feelingUtf8.constData(),
-                sizeof(update.m_userFeeling) - 1);
-        slot_clientSendData(0, reinterpret_cast<char *>(&update), sizeof(update));
-
-        m_name = updatedName;
-        m_userIconId = qBound(0, updatedIconId, 35);
-        if (m_pendingRegistrationAvatarChanged) {
-            if (m_pendingRegistrationAvatarData.isEmpty()) {
-                m_userAvatar = QImage();
-            } else {
-                QImage customAvatar;
-                if (customAvatar.loadFromData(m_pendingRegistrationAvatarData, "JPG")) {
-                    m_userAvatar = customAvatar;
-                }
-            }
-            sendAvatarUpload(m_pendingRegistrationAvatarData);
-        }
+        const QByteArray updatedAvatar = m_pendingRegistrationAvatarData;
+        const bool avatarChanged = m_pendingRegistrationAvatarChanged;
 
         m_pendingRegistrationTel.clear();
         m_pendingRegistrationNickname.clear();
         m_pendingRegistrationAvatarData.clear();
         m_pendingRegistrationAvatarChanged = false;
+        if (!queueUserInfoSave(updatedIconId, updatedName, feeling,
+                               updatedAvatar, avatarChanged)) {
+            QMessageBox::warning(m_loginDialog, "提示",
+                                 "用户资料暂未保存，正在重新连接服务器");
+        }
+        return;
     }
 
-    m_demoDialog->slot_setInfo(m_name, m_userIconId);
+    if (m_profileSavePending) {
+        const QByteArray avatarData = m_pendingProfileAvatarData;
+        const bool avatarChanged = m_pendingProfileAvatarChanged;
+        clearPendingProfileSave();
+        if (avatarChanged) {
+            if (!sendAvatarUpload(avatarData)) {
+                QMessageBox::warning(m_setUserDialog, "提示",
+                                     "头像未上传，正在重新登录后重试");
+            }
+        } else {
+            QMessageBox::information(m_setUserDialog, "提示", "用户资料已保存");
+        }
+    }
 
-    // 更新设置ui
-    m_setUserDialog->slot_setInfo(m_userIconId, m_name, feeling);
-    updateOwnRoomAvatar(m_userAvatar.isNull() ? builtInAvatar(m_userIconId)
-                                               : m_userAvatar);
     requestAvatar(m_userid);
 }
 
@@ -712,18 +793,39 @@ void CKernal::slot_dealAvatarUploadRs(uint socket, char *buf, int nlen)
     if (rs->m_UserID != m_userid) {
         return;
     }
-    if (rs->m_result != 0) {
-        qWarning() << "Avatar upload rejected by server:" << rs->m_result
-                   << "for user" << rs->m_UserID;
-        QMessageBox::warning(
-                    m_setUserDialog, "头像上传失败",
-                    QString("服务端拒绝了头像上传（错误码 %1）。请重新登录后重试；"
-                            "若仍失败，请检查服务端的会话令牌和头像数据库配置。")
-                    .arg(rs->m_result));
+    if (rs->m_result == 0) {
+        requestAvatar(m_userid);
+        QMessageBox::information(m_setUserDialog, "提示", "用户资料已保存，头像上传成功");
         return;
     }
-    requestAvatar(m_userid);
-    QMessageBox::information(m_setUserDialog, "提示", "用户资料已提交，头像上传成功");
+
+    QString message;
+    switch (rs->m_result) {
+    case 1:
+        message = "登录令牌已失效，正在重新登录";
+        break;
+    case 2:
+        message = "控制连接与用户认证不匹配，正在重新登录";
+        break;
+    case 3:
+        message = "图片无效，请选择 JPEG 格式且不超过 256 KiB 的头像";
+        break;
+    case 4:
+        message = "服务器数据库保存失败，请稍后重试";
+        break;
+    case 5:
+        message = "服务器文件保存失败，请稍后重试";
+        break;
+    default:
+        message = QString("服务端拒绝了头像上传（错误码 %1）").arg(rs->m_result);
+        break;
+    }
+    qWarning() << "Avatar upload rejected by server:" << rs->m_result
+               << "for user" << rs->m_UserID;
+    QMessageBox::warning(m_setUserDialog, "头像上传失败", message);
+    if (rs->m_result == 1 || rs->m_result == 2) {
+        beginControlRecovery();
+    }
 }
 
 void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
@@ -835,50 +937,20 @@ void CKernal::slot_setUser()
 void CKernal::slot_userSetCommit(int iconid, QString name, QString feeling,
                                  QByteArray avatarData, bool avatarChanged)
 {
-    // 发包
-    // 中文兼容 utf8
-    std::string strName = name.toStdString();
-    std::string strfeeling = feeling.toStdString();
-
-    STRU_USER_INFO_RQ rq;
-    rq.m_iconid = iconid;
-    rq.m_UserID = m_userid;
-    strncpy(rq.m_userFeeling, strfeeling.c_str(), sizeof(rq.m_userFeeling) - 1);
-    strncpy(rq.m_szUser, strName.c_str(), sizeof(rq.m_szUser) - 1);
-
-    const bool infoSent = slot_clientSendData(0, reinterpret_cast<char*>(&rq), sizeof(rq));
-    m_name = name;
-    m_userIconId = qBound(0, iconid, 35);
-    m_demoDialog->slot_setInfo(m_name, iconid);
-
-    if (avatarChanged) {
-        if (avatarData.isEmpty()) {
-            m_userAvatar = QImage();
-        } else {
-            QImage customAvatar;
-            if (customAvatar.loadFromData(avatarData, "JPG")) {
-                m_userAvatar = customAvatar;
-            }
-        }
+    if (m_profileSavePending) {
+        QMessageBox::information(m_setUserDialog, "提示", "上一项用户资料正在保存，请稍候");
+        return;
     }
-    updateOwnRoomAvatar(m_userAvatar.isNull() ? builtInAvatar(m_userIconId)
-                                               : m_userAvatar);
-
-    if (avatarChanged && !sendAvatarUpload(avatarData)) {
+    if (!queueUserInfoSave(iconid, name, feeling, avatarData, avatarChanged)) {
         QMessageBox::warning(m_setUserDialog, "提示",
-                             "头像未上传。请确认服务器已升级并重新登录后再试");
-    }
-
-    if (infoSent && !avatarChanged) {
-        QMessageBox::information(m_demoDialog, "提示", "用户资料已提交");
-    } else {
-        QMessageBox::warning(m_demoDialog, "提示", "用户信息保存失败，请检查网络连接");
+                             "控制连接已断开，正在重新登录；请稍后重新保存资料");
     }
 }
 
 void CKernal::requestAvatar(int targetUserId)
 {
-    if (targetUserId <= 0 || m_userid <= 0 || !hasValidSessionToken(m_sessionToken)) {
+    if (targetUserId <= 0 || !hasAuthenticatedControlConnection() ||
+            !hasValidSessionToken(m_sessionToken)) {
         return;
     }
 
@@ -886,12 +958,12 @@ void CKernal::requestAvatar(int targetUserId)
     rq.m_RequestUserID = m_userid;
     rq.m_TargetUserID = targetUserId;
     memcpy(rq.m_sessionToken, m_sessionToken, sizeof(rq.m_sessionToken));
-    slot_clientSendData(0, reinterpret_cast<char*>(&rq), sizeof(rq));
+    sendControlPacket(reinterpret_cast<char*>(&rq), sizeof(rq));
 }
 
 bool CKernal::sendAvatarUpload(const QByteArray &avatarData)
 {
-    if (m_userid <= 0 || !hasValidSessionToken(m_sessionToken) ||
+    if (!hasAuthenticatedControlConnection() || !hasValidSessionToken(m_sessionToken) ||
             avatarData.size() > DEF_AVATAR_IMAGE_MAX_SIZE ||
             (!avatarData.isEmpty() && !hasJpegSignature(avatarData))) {
         return false;
@@ -907,7 +979,7 @@ bool CKernal::sendAvatarUpload(const QByteArray &avatarData)
     if (!avatarData.isEmpty()) {
         memcpy(packet.data() + sizeof(header), avatarData.constData(), avatarData.size());
     }
-    return slot_clientSendData(0, packet.data(), packet.size());
+    return sendControlPacket(packet.constData(), packet.size());
 }
 
 // 退出房间
@@ -1405,9 +1477,167 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     slot_refleshUserImage(userid, img);
 }
 
+bool CKernal::hasAuthenticatedControlConnection() const
+{
+    return m_controlSocket &&
+            m_controlSocket->state() == QAbstractSocket::ConnectedState &&
+            m_loggedIn && m_userid > 0;
+}
+
+bool CKernal::writeControlFrame(const char *data, int length)
+{
+    if (!m_controlSocket || !data || length < static_cast<int>(sizeof(PackType)) ||
+            length > _DEF_MAX_PACKET_SIZE ||
+            m_controlSocket->state() != QAbstractSocket::ConnectedState) {
+        return false;
+    }
+
+    QByteArray frame(static_cast<int>(sizeof(int)) + length, '\0');
+    memcpy(frame.data(), &length, sizeof(length));
+    memcpy(frame.data() + sizeof(int), data, length);
+    return m_controlSocket->write(frame) == frame.size();
+}
+
+bool CKernal::sendControlPacket(const char *data, int length, bool requiresLogin)
+{
+    if (!data || length < static_cast<int>(sizeof(PackType)) ||
+            length > _DEF_MAX_PACKET_SIZE) {
+        return false;
+    }
+
+    if (requiresLogin && (!m_controlSocket ||
+            m_controlSocket->state() != QAbstractSocket::ConnectedState ||
+            !m_loggedIn)) {
+        beginControlRecovery();
+        return false;
+    }
+    if (!m_controlSocket ||
+            m_controlSocket->state() != QAbstractSocket::ConnectedState) {
+        ensureControlConnection();
+        return false;
+    }
+
+    if (!writeControlFrame(data, length)) {
+        m_controlSocket->abort();
+        return false;
+    }
+    return true;
+}
+
+void CKernal::ensureControlConnection()
+{
+    if (!m_controlSocket || m_shuttingDown ||
+            m_controlSocket->state() == QAbstractSocket::ConnectedState ||
+            m_controlSocket->state() == QAbstractSocket::ConnectingState ||
+            m_controlSocket->state() == QAbstractSocket::HostLookupState) {
+        return;
+    }
+    m_controlSocket->connectToHost(m_serverIP, m_serverPort);
+}
+
+void CKernal::sendPendingLogin()
+{
+    if (!m_loginPending || m_loginRequest.isEmpty()) {
+        return;
+    }
+    if (!writeControlFrame(m_loginRequest.constData(), m_loginRequest.size())) {
+        m_controlSocket->abort();
+        return;
+    }
+    m_loginTimeoutTimer->start();
+}
+
+void CKernal::sendPendingRegistration()
+{
+    if (m_pendingRegisterRequest.isEmpty()) {
+        return;
+    }
+    if (writeControlFrame(m_pendingRegisterRequest.constData(),
+                          m_pendingRegisterRequest.size())) {
+        m_pendingRegisterRequest.clear();
+    }
+}
+
+void CKernal::resetAuthenticationState()
+{
+    m_loggedIn = false;
+    m_userid = 0;
+    memset(m_sessionToken, 0, sizeof(m_sessionToken));
+    clearPendingProfileSave();
+}
+
+void CKernal::scheduleControlReconnect()
+{
+    if (!m_shuttingDown && m_loginPending && !m_loginRequest.isEmpty() &&
+            !m_controlReconnectTimer->isActive()) {
+        m_controlReconnectTimer->start();
+    }
+}
+
+void CKernal::beginControlRecovery()
+{
+    if (m_shuttingDown) {
+        return;
+    }
+
+    const bool shouldRelogin = (m_loggedIn || m_loginPending) &&
+            !m_loginRequest.isEmpty();
+    m_controlReceiveBuffer.clear();
+    resetAuthenticationState();
+    if (m_roomRequest != RoomRequest::None) {
+        clearRoomRequest();
+        m_demoDialog->slot_setPushButton_enable(true);
+    }
+    if (shouldRelogin) {
+        m_loginPending = true;
+        if (m_loginDialog) {
+            m_loginDialog->slot_setLoginPending(true);
+        }
+        if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+            m_controlSocket->abort();
+        } else {
+            scheduleControlReconnect();
+        }
+    }
+}
+
+void CKernal::clearPendingProfileSave()
+{
+    m_profileSavePending = false;
+    m_pendingProfileAvatarData.clear();
+    m_pendingProfileAvatarChanged = false;
+}
+
+bool CKernal::queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
+                                 const QByteArray& avatarData, bool avatarChanged)
+{
+    if (!hasAuthenticatedControlConnection()) {
+        beginControlRecovery();
+        return false;
+    }
+
+    STRU_USER_INFO_RQ rq;
+    rq.m_UserID = m_userid;
+    rq.m_iconid = qBound(0, iconid, 35);
+    const QByteArray nameUtf8 = name.toUtf8();
+    const QByteArray feelingUtf8 = feeling.toUtf8();
+    strncpy(rq.m_szUser, nameUtf8.constData(), sizeof(rq.m_szUser) - 1);
+    strncpy(rq.m_userFeeling, feelingUtf8.constData(), sizeof(rq.m_userFeeling) - 1);
+
+    if (!sendControlPacket(reinterpret_cast<char*>(&rq), sizeof(rq))) {
+        return false;
+    }
+
+    m_profileSavePending = true;
+    m_pendingProfileAvatarData = avatarData;
+    m_pendingProfileAvatarChanged = avatarChanged;
+    return true;
+}
+
 bool CKernal::slot_clientSendData(uint socket, char *buf, int nlen)
 {
-    return m_client->SendData(socket, buf, nlen);
+    Q_UNUSED(socket);
+    return sendControlPacket(buf, nlen);
 }
 
 void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
@@ -1429,24 +1659,21 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 
     // 提取手机号 密码
     m_loginTel = tel;
-    std::string strTel = tel.toStdString();
-    std::string strPasswd = GetMD5(passwd);
-    // 写入协议包，网络发送
+    const QByteArray telUtf8 = tel.toUtf8();
+    const std::string passwordHash = GetMD5(passwd);
     STRU_LOGIN_RQ rq;
-    strncpy(rq.tel, strTel.c_str(), sizeof(rq.tel) - 1);
-    strncpy(rq.password, strPasswd.c_str(), sizeof(rq.password) - 1);
+    strncpy(rq.tel, telUtf8.constData(), sizeof(rq.tel) - 1);
+    strncpy(rq.password, passwordHash.c_str(), sizeof(rq.password) - 1);
 
+    resetAuthenticationState();
+    m_loginRequest = QByteArray(reinterpret_cast<const char*>(&rq), sizeof(rq));
     m_loginPending = true;
     m_loginDialog->slot_setLoginPending(true);
-    m_loginTimeoutTimer->start();
-    if (!slot_clientSendData(0, (char*)&rq, sizeof(rq))) {
-        m_loginTimeoutTimer->stop();
-        m_loginPending = false;
-        m_loginDialog->slot_setLoginPending(false);
-        QMessageBox::warning(m_loginDialog, "提示",
-                             "无法连接服务器，请检查网络或稍后重试");
+    if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+        sendPendingLogin();
+    } else {
+        ensureControlConnection();
     }
-    //    qDebug() << rq.tel << " " << rq.password;
 }
 
 // 注册提交
@@ -1454,12 +1681,12 @@ void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
                                   int iconid, QByteArray avatarData, bool avatarChanged)
 {
     // 提取手机号 密码
-    std::string strTel = tel.toStdString();
-    std::string strPasswd = GetMD5(passwd);
+    const QByteArray telUtf8 = tel.toUtf8();
+    const std::string passwordHash = GetMD5(passwd);
     // 写入协议包，网络发送
     STRU_REGISTER_RQ rq;
-    strncpy(rq.tel, strTel.c_str(), sizeof(rq.tel) - 1);
-    strncpy(rq.password, strPasswd.c_str(), sizeof(rq.password) - 1);
+    strncpy(rq.tel, telUtf8.constData(), sizeof(rq.tel) - 1);
+    strncpy(rq.password, passwordHash.c_str(), sizeof(rq.password) - 1);
 
     m_registerDraftTel = tel;
     m_registerDraftPassword = passwd;
@@ -1468,16 +1695,12 @@ void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
     m_registerDraftAvatarData = avatarData;
     m_registerDraftAvatarChanged = avatarChanged;
 
-    if (!slot_clientSendData(0, (char*)&rq, sizeof(rq))) {
-        m_registerDraftTel.clear();
-        m_registerDraftPassword.clear();
-        m_registerDraftNickname.clear();
-        m_registerDraftAvatarData.clear();
-        m_registerDraftAvatarChanged = false;
-        QMessageBox::warning(m_loginDialog, "提示",
-                             "无法连接服务器，请检查网络或稍后重试");
+    m_pendingRegisterRequest = QByteArray(reinterpret_cast<const char*>(&rq), sizeof(rq));
+    if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+        sendPendingRegistration();
+    } else {
+        ensureControlConnection();
     }
-    qDebug() << rq.tel << " " << rq.password;
 }
 
 // 加入房间
