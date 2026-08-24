@@ -713,10 +713,17 @@ void CKernal::slot_dealAvatarUploadRs(uint socket, char *buf, int nlen)
         return;
     }
     if (rs->m_result != 0) {
-        QMessageBox::warning(m_setUserDialog, "提示", "头像上传失败，请稍后重试");
+        qWarning() << "Avatar upload rejected by server:" << rs->m_result
+                   << "for user" << rs->m_UserID;
+        QMessageBox::warning(
+                    m_setUserDialog, "头像上传失败",
+                    QString("服务端拒绝了头像上传（错误码 %1）。请重新登录后重试；"
+                            "若仍失败，请检查服务端的会话令牌和头像数据库配置。")
+                    .arg(rs->m_result));
         return;
     }
     requestAvatar(m_userid);
+    QMessageBox::information(m_setUserDialog, "提示", "用户资料已提交，头像上传成功");
 }
 
 void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
@@ -862,8 +869,8 @@ void CKernal::slot_userSetCommit(int iconid, QString name, QString feeling,
                              "头像未上传。请确认服务器已升级并重新登录后再试");
     }
 
-    if (infoSent) {
-        QMessageBox::about(m_demoDialog, "提示", "用户信息设置成功");
+    if (infoSent && !avatarChanged) {
+        QMessageBox::information(m_demoDialog, "提示", "用户资料已提交");
     } else {
         QMessageBox::warning(m_demoDialog, "提示", "用户信息保存失败，请检查网络连接");
     }

@@ -11,7 +11,7 @@ demoDialog::demoDialog(QWidget *parent)
 {
     ui->setupUi(this);
 
-    setWindowTitle("Meeting");
+    setWindowTitle("Audio-Video");
     resize(540, 640);
     setMinimumSize(480, 560);
 

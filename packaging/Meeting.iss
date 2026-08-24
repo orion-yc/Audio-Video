@@ -1,17 +1,17 @@
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 
-#define AppName "Meeting"
-#define AppExeName "Meeting.exe"
-#define SourceDir "..\dist\Meeting-" + AppVersion
+#define AppName "Audio-Video"
+#define AppExeName "Audio-Video.exe"
+#define SourceDir "..\dist\Audio-Video-" + AppVersion
 
 [Setup]
 AppId={{A14BFCA1-CF8B-4FA0-9B9A-DA89DE804DB4}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=Meeting
+AppPublisher=Audio-Video
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -19,7 +19,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
-OutputBaseFilename=Meeting-Setup-{#AppVersion}
+OutputBaseFilename=Audio-Video-Setup-{#AppVersion}
 SetupIconFile=..\images\message.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64

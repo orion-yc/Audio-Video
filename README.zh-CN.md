@@ -1,8 +1,8 @@
-# Meeting
+# Audio-Video
 
 [English](README.md) | 简体中文
 
-Meeting 是一款面向小型实时会议的 Windows 桌面客户端。项目基于 Qt，提供房间会议、摄像头与桌面共享、语音、用户资料和轻量级 TCP 转发协议。
+Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项目基于 Qt，提供房间会议、摄像头与桌面共享、语音、用户资料和轻量级 TCP 转发协议。
 
 ## 功能概览
 
@@ -16,7 +16,7 @@ Meeting 是一款面向小型实时会议的 Windows 桌面客户端。项目基
 ## 运行要求
 
 - Windows 10 或 Windows 11，64 位
-- 可访问兼容的 Meeting 服务端
+- 可访问兼容的 Audio-Video 服务端
 - 音视频会议需要授予摄像头和麦克风权限
 - NVIDIA 显卡及驱动为可选项。没有 NVENC 时，客户端会自动使用软件 H.264 编码。
 
@@ -24,15 +24,15 @@ Meeting 是一款面向小型实时会议的 Windows 桌面客户端。项目基
 
 有发布包时，可任选一种方式使用：
 
-1. 运行 `Meeting-Setup-<version>.exe`，按安装向导完成安装。默认按当前用户安装，不需要管理员权限。
-2. 或解压 `Meeting-Portable-<version>.zip`，运行 `Meeting.exe`。便携版中的所有文件和目录需要保持在一起。
+1. 运行 `Audio-Video-Setup-<version>.exe`，按安装向导完成安装。默认按当前用户安装，不需要管理员权限。
+2. 或解压 `Audio-Video-Portable-<version>.zip`，运行 `Audio-Video.exe`。便携版中的所有文件和目录需要保持在一起。
 3. 启动客户端后注册或登录，再创建房间或输入房间号加入会议。
 
 未签名的构建在 Windows 中可能出现未知发布者提示；在使用商业代码签名证书之前，这是正常现象。
 
 ## 服务端配置
 
-客户端读取 `Meeting.exe` 同目录下的 `config.ini`：
+客户端读取 `Audio-Video.exe` 同目录下的 `config.ini`：
 
 ```ini
 [Net]
@@ -66,13 +66,13 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.0
+.\packaging\build-release.ps1 -Version 1.0.1
 ```
 
-如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot` 和 `-FFmpegRoot`。构建成功后，`dist` 目录会生成：
+如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist` 目录会生成：
 
-- `Meeting-Setup-1.0.0.exe`
-- `Meeting-Portable-1.0.0.zip`
+- `Audio-Video-Setup-1.0.1.exe`
+- `Audio-Video-Portable-1.0.1.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 

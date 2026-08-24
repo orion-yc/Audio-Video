@@ -28,7 +28,7 @@ make -j"$(nproc)"
 sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin meeting 2>/dev/null || true
 sudo install -d -o root -g root -m 755 /opt/meeting
 sudo install -o root -g root -m 755 server /opt/meeting/server
-sudo install -o root -g root -m 644 /path/to/Meeting/deploy/meeting-server.service /etc/systemd/system/meeting-server.service
+sudo install -o root -g root -m 644 /path/to/Audio-Video/deploy/meeting-server.service /etc/systemd/system/meeting-server.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now meeting-server
 ```
@@ -55,7 +55,7 @@ dashboard is enabled by these templates.
 
 ## 4. Configure clients
 
-Place `config.ini` next to `Meeting02.exe` and set its `host` to the VPS IP or DNS
+Place `config.ini` next to `Audio-Video.exe` and set its `host` to the VPS IP or DNS
 name and `port` to `18000`. The new client supports both DNS names and IPv4.
 
 FRP TLS protects the `frpc` to `frps` tunnel, but the public client to VPS segment

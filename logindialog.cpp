@@ -38,14 +38,14 @@ LoginDialog::LoginDialog(QWidget *parent) :
     m_registerAvatarCombo = new QComboBox(ui->page_2);
     m_registerAvatarUploadButton = new QPushButton("上传头像", ui->page_2);
 
-    setWindowTitle("Meeting");
+    setWindowTitle("Audio-Video");
     setFixedSize(820, 500);
 
     constexpr int sideWidth = 276;
     constexpr int panelWidth = 544;
     ui->lb_icon->setGeometry(0, 0, sideWidth, 500);
     ui->lb_icon->setPixmap(QPixmap());
-    ui->lb_icon->setText("MEETING");
+    ui->lb_icon->setText("AUDIO-VIDEO");
     ui->lb_icon->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     ui->tw_page->setMinimumSize(panelWidth, 500);
     ui->tw_page->setMaximumSize(panelWidth, 500);

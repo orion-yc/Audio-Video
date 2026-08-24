@@ -1,8 +1,8 @@
-# Meeting
+# Audio-Video
 
 [简体中文](README.zh-CN.md) | English
 
-Meeting is a Windows desktop client for small real-time video meetings. It combines room-based calls, camera and desktop sharing, voice, profiles, and a lightweight TCP relay protocol in one Qt application.
+Audio-Video is a Windows desktop client for small real-time video meetings. It combines room-based calls, camera and desktop sharing, voice, profiles, and a lightweight TCP relay protocol in one Qt application.
 
 ## Highlights
 
@@ -16,7 +16,7 @@ Meeting is a Windows desktop client for small real-time video meetings. It combi
 ## Requirements
 
 - Windows 10 or Windows 11, 64-bit
-- Access to a compatible Meeting server
+- Access to a compatible Audio-Video server
 - Camera and microphone permissions for audio/video calls
 - An NVIDIA GPU and current driver are optional. Systems without NVENC automatically use software H.264 encoding.
 
@@ -24,15 +24,15 @@ Meeting is a Windows desktop client for small real-time video meetings. It combi
 
 Use a release asset when one is available:
 
-1. Run `Meeting-Setup-<version>.exe` for a normal per-user installation. Administrator rights are not required by the installer.
-2. Or extract `Meeting-Portable-<version>.zip` and run `Meeting.exe`. Keep every extracted file and directory together.
+1. Run `Audio-Video-Setup-<version>.exe` for a normal per-user installation. Administrator rights are not required by the installer.
+2. Or extract `Audio-Video-Portable-<version>.zip` and run `Audio-Video.exe`. Keep every extracted file and directory together.
 3. Start the client, register or sign in, then create a room or enter an existing room number.
 
 Windows may show an unknown-publisher warning for unsigned builds. This is expected until the release executable is code-signed.
 
 ## Server Configuration
 
-The desktop client reads `config.ini` next to `Meeting.exe`:
+The desktop client reads `config.ini` next to `Audio-Video.exe`:
 
 ```ini
 [Net]
@@ -66,13 +66,13 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.0
+.\packaging\build-release.ps1 -Version 1.0.1
 ```
 
-The script accepts `-QtRoot`, `-MinGwRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist`:
+The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist`:
 
-- `Meeting-Setup-1.0.0.exe`
-- `Meeting-Portable-1.0.0.zip`
+- `Audio-Video-Setup-1.0.1.exe`
+- `Audio-Video-Portable-1.0.1.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 

@@ -1,5 +1,5 @@
-Meeting 1.0.0
-=============
+Audio-Video 1.0.1
+=================
 
 System requirements
 -------------------
@@ -10,17 +10,17 @@ System requirements
 
 Installation
 ------------
-Run Meeting-Setup-1.0.0.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.0.1.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Meeting-Portable-1.0.0.zip, then run Meeting.exe.
+Extract Audio-Video-Portable-1.0.1.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration
 -------------
-The server is configured in config.ini next to Meeting.exe:
+The server is configured in config.ini next to Audio-Video.exe:
 
 [Net]
 host=www.onnotify.top
@@ -30,7 +30,7 @@ Notes
 -----
 - Video uses H.264. NVIDIA NVENC is selected first; if it is unavailable, the
   client automatically uses the bundled OpenH264 software encoder.
-- Everyone in the room should use Meeting 1.0.13 or later to view H.264 video.
+- Everyone in the room should use an Audio-Video client with H.264 support.
   This version can still receive JPEG video from earlier clients.
 - The server only relays the video payload and needs no H.264 configuration.
 - FFmpeg LGPL runtime notices are included in THIRD_PARTY_NOTICES.txt and

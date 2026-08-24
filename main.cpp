@@ -7,6 +7,8 @@
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    a.setApplicationName("Audio-Video");
+    a.setApplicationDisplayName("Audio-Video");
     applyAppStyle(a);
 //    demoDialog w;
 //    w.show();

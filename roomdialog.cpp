@@ -8,7 +8,7 @@ RoomDialog::RoomDialog(QWidget *parent) :
 {
     ui->setupUi(this);
 
-    setWindowTitle("Meeting");
+    setWindowTitle("Audio-Video");
     resize(1280, 800);
     setMinimumSize(960, 640);
     ui->wdg_top->setFixedHeight(52);
