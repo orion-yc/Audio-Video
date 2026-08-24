@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 
 #define _DEF_BUFFER  ( 4096 )
 #define _DEF_CONTENT_SIZE	(1024)
@@ -128,6 +130,21 @@ typedef struct STRU_LOGIN_RS
 	int result;
 	char sessionToken[SESSION_TOKEN_SIZE];
 }STRU_LOGIN_RS;
+
+// Login packets use the compiler's default alignment. Do not pack them.
+static_assert(sizeof(STRU_LOGIN_RQ) == 84,
+              "Login request protocol layout must remain 84 bytes.");
+static_assert(sizeof(STRU_LOGIN_RS) == 48,
+              "Login response protocol layout must remain 48 bytes.");
+static_assert(offsetof(STRU_LOGIN_RQ, type) == 0 &&
+              offsetof(STRU_LOGIN_RQ, tel) == 4 &&
+              offsetof(STRU_LOGIN_RQ, password) == 44,
+              "Login request field offsets must remain stable.");
+static_assert(offsetof(STRU_LOGIN_RS, type) == 0 &&
+              offsetof(STRU_LOGIN_RS, userid) == 4 &&
+              offsetof(STRU_LOGIN_RS, result) == 8 &&
+              offsetof(STRU_LOGIN_RS, sessionToken) == 12,
+              "Login response field offsets must remain stable.");
 
 ////用户信息
 //typedef struct STRU_USER_INFO

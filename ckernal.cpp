@@ -1,5 +1,6 @@
 #include "ckernal.h"
 #include <QDebug>
+#include <QCryptographicHash>
 #include <QMessageBox>
 #include "md5.h"
 
@@ -551,20 +552,25 @@ void CKernal::slot_dealData(uint socket, char *buf, int nlen)
 void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 {
     Q_UNUSED(socket);
-    const int loginResponseHeaderSize = 3 * static_cast<int>(sizeof(int));
-    if (nlen < loginResponseHeaderSize) {
+    // Every 10003 response, including a failure response, ends the pending UI
+    // state. The control receive buffer has already assembled the outer frame.
+    m_loginTimeoutTimer->stop();
+    m_loginPending = false;
+    if (m_loginDialog) {
+        m_loginDialog->slot_setLoginPending(false);
+    }
+
+    if (nlen != static_cast<int>(sizeof(STRU_LOGIN_RS))) {
+        resetAuthenticationState();
+        QMessageBox::warning(m_loginDialog, "提示",
+                             "服务器返回的登录响应长度无效，请重试");
         return;
     }
 
-    m_loginTimeoutTimer->stop();
-    m_loginPending = false;
-    m_loginDialog->slot_setLoginPending(false);
-
     int userid = 0;
     int result = 0;
-    memcpy(&userid, buf + sizeof(int), sizeof(userid));
-    memcpy(&result, buf + 2 * sizeof(int), sizeof(result));
-    const int tokenOffset = 3 * static_cast<int>(sizeof(int));
+    memcpy(&userid, buf + offsetof(STRU_LOGIN_RS, userid), sizeof(userid));
+    memcpy(&result, buf + offsetof(STRU_LOGIN_RS, result), sizeof(result));
     if (result != login_success) {
         resetAuthenticationState();
         switch (result) {
@@ -584,7 +590,7 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
         return;
     }
 
-    if (userid <= 0 || nlen < tokenOffset + SESSION_TOKEN_SIZE) {
+    if (userid <= 0) {
         resetAuthenticationState();
         QMessageBox::warning(m_loginDialog, "提示", "服务器返回的登录会话无效，请重试");
         return;
@@ -592,7 +598,8 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 
     char sessionToken[SESSION_TOKEN_SIZE] = {};
     // Keep the NUL byte: the server validates all 33 bytes of this field.
-    memcpy(sessionToken, buf + tokenOffset, sizeof(sessionToken));
+    memcpy(sessionToken, buf + offsetof(STRU_LOGIN_RS, sessionToken),
+           sizeof(sessionToken));
     if (!hasValidSessionToken(sessionToken)) {
         resetAuthenticationState();
         QMessageBox::warning(m_loginDialog, "提示", "服务器返回的登录令牌无效，请重试");
@@ -1660,13 +1667,20 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
     // 提取手机号 密码
     m_loginTel = tel;
     const QByteArray telUtf8 = tel.toUtf8();
-    const std::string passwordHash = GetMD5(passwd);
-    STRU_LOGIN_RQ rq;
-    strncpy(rq.tel, telUtf8.constData(), sizeof(rq.tel) - 1);
-    strncpy(rq.password, passwordHash.c_str(), sizeof(rq.password) - 1);
+    const QByteArray passwordHash = QCryptographicHash::hash(
+                passwd.toUtf8(), QCryptographicHash::Md5).toHex();
+    QByteArray loginRequest(sizeof(STRU_LOGIN_RQ), '\0');
+    const PackType type = DEF_PACK_LOGIN_RQ;
+    memcpy(loginRequest.data() + offsetof(STRU_LOGIN_RQ, type), &type, sizeof(type));
+    const int telLength = qMin(telUtf8.size(), _MAX_SIZE - 1);
+    memcpy(loginRequest.data() + offsetof(STRU_LOGIN_RQ, tel),
+           telUtf8.constData(), telLength);
+    Q_ASSERT(passwordHash.size() == 32);
+    memcpy(loginRequest.data() + offsetof(STRU_LOGIN_RQ, password),
+           passwordHash.constData(), passwordHash.size());
 
     resetAuthenticationState();
-    m_loginRequest = QByteArray(reinterpret_cast<const char*>(&rq), sizeof(rq));
+    m_loginRequest = loginRequest;
     m_loginPending = true;
     m_loginDialog->slot_setLoginPending(true);
     if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
