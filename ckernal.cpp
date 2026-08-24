@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QCryptographicHash>
 #include <QMessageBox>
+#include <QNetworkProxy>
 #include "md5.h"
 
 // 通过宏定义化简
@@ -156,6 +157,11 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     setNetMap();
     initConfig();
 
+    // The meeting protocol is raw TCP. A desktop HTTP/SOCKS proxy can accept
+    // the local connection without relaying this binary protocol to the server.
+    m_controlSocket->setProxy(QNetworkProxy::NoProxy);
+    m_latencySocket->setProxy(QNetworkProxy::NoProxy);
+
     m_loginDialog = new LoginDialog;
     m_demoDialog  = new demoDialog;
 
@@ -194,21 +200,6 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     connect(m_controlReconnectTimer, &QTimer::timeout,
             this, &CKernal::slot_controlReconnect);
     ensureControlConnection();
-
-    // 构造里面av连接
-    for(int i = 0 ; i < 2; ++i)
-    {
-        m_tcpAV[i]  = new TcpClientMediator;
-        if (i == 0) {
-            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
-        } else {
-            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
-        }
-
-        m_tcpAV[i]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort);
-    }
 
     m_loginDialog->show();
 
@@ -320,6 +311,13 @@ void CKernal::slot_destroy()
     m_pendingRoomId = 0;
     m_latencySocket->abort();
     m_controlSocket->abort();
+    for (TcpClientMediator*& channel : m_tcpAV) {
+        if (channel) {
+            channel->CloseNet();
+            delete channel;
+            channel = nullptr;
+        }
+    }
     if(m_loginDialog){
         m_loginDialog->hide();  // 不写close。不然会触发关闭时间会死循环
         delete m_loginDialog; m_loginDialog = NULL;
@@ -350,6 +348,11 @@ void CKernal::slot_destroy()
 
 void CKernal::slot_measureLatency()
 {
+    // Login owns the only server connection until the main control socket has
+    // authenticated. Do not let a probe race the login connection.
+    if (!m_loggedIn || m_loginPending) {
+        return;
+    }
     if (m_latencyProbeActive) {
         return;
     }
@@ -419,12 +422,13 @@ void CKernal::slot_loginTimeout()
         return;
     }
 
-    // A stale control connection must be replaced before sending the cached
-    // login request again. Keep the pending state so recovery can continue.
-    if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
+    // Cover both a sent login request and a connection that never reaches the
+    // connected state. Aborting guarantees the recovery path gets a fresh TCP
+    // socket instead of leaving the dialog pending forever.
+    if (m_controlSocket->state() != QAbstractSocket::UnconnectedState) {
         m_controlSocket->abort();
     } else {
-        scheduleControlReconnect();
+        beginControlRecovery();
     }
 }
 
@@ -614,6 +618,7 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 
     // Audio and video have their own channels. They receive the same complete
     // token only after the control connection has authenticated this user.
+    ensureAvConnections();
     STRU_AUDIO_REGISTER audiorq;
     audiorq.m_userid = m_userid;
     memcpy(audiorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
@@ -623,6 +628,7 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
     videorq.m_userid = m_userid;
     memcpy(videorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
     slot_clientVideoSendData(0, reinterpret_cast<char*>(&videorq), sizeof(videorq));
+    QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
 
 // 注册回复处理
@@ -1542,6 +1548,29 @@ void CKernal::ensureControlConnection()
     m_controlSocket->connectToHost(m_serverIP, m_serverPort);
 }
 
+void CKernal::ensureAvConnections()
+{
+    for (int i = 0; i < 2; ++i) {
+        if (m_tcpAV[i]) {
+            continue;
+        }
+
+        m_tcpAV[i] = new TcpClientMediator;
+        if (i == 0) {
+            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+                    this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
+        } else {
+            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+                    this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
+        }
+
+        if (!m_tcpAV[i]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort)) {
+            qWarning() << "Unable to open" << (i == 0 ? "audio" : "video")
+                       << "channel after control login.";
+        }
+    }
+}
+
 void CKernal::sendPendingLogin()
 {
     if (!m_loginPending || m_loginRequest.isEmpty()) {
@@ -1649,12 +1678,16 @@ bool CKernal::slot_clientSendData(uint socket, char *buf, int nlen)
 
 void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
 {
-    m_tcpAV[0]->SendData(socket, buf, nlen);
+    if (m_tcpAV[0]) {
+        m_tcpAV[0]->SendData(socket, buf, nlen);
+    }
 }
 
 void CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
 {
-    m_tcpAV[1]->SendData(socket, buf, nlen);
+    if (m_tcpAV[1]) {
+        m_tcpAV[1]->SendData(socket, buf, nlen);
+    }
 }
 
 // 登录提交
@@ -1683,6 +1716,9 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
     m_loginRequest = loginRequest;
     m_loginPending = true;
     m_loginDialog->slot_setLoginPending(true);
+    // Start the deadline before connecting as well as after writing. A proxy
+    // or stalled host lookup otherwise never emits a login-response timeout.
+    m_loginTimeoutTimer->start();
     if (m_controlSocket->state() == QAbstractSocket::ConnectedState) {
         sendPendingLogin();
     } else {

@@ -175,6 +175,7 @@ private:
     bool queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
                            const QByteArray& avatarData, bool avatarChanged);
     void ensureControlConnection();
+    void ensureAvConnections();
     void sendPendingLogin();
     void sendPendingRegistration();
     void resetAuthenticationState();
@@ -217,8 +218,8 @@ private:
     quint64                          m_videoStreamGeneration;
     VideoSource                      m_activeVideoSource;
 
-    // 视频和音频单独的tcp
-    INetMediator*                   m_tcpAV[2]; // 0 音频 1 视频
+    // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
+    TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频
     QTcpSocket*                     m_latencySocket;
     QTimer*                         m_latencyTimer;
     QTimer*                         m_latencyTimeoutTimer;
