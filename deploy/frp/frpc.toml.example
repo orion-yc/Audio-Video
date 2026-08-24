@@ -1,0 +1,17 @@
+# frpc runs on the same Linux VM as the meeting server.
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = 7000
+
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/frp/client_token"
+transport.tls.enable = true
+
+[[proxies]]
+name = "meeting-tcp"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8000
+remotePort = 18000
+
+# JPEG and Speex payloads are already compressed; FRP compression wastes CPU here.
+transport.useCompression = false

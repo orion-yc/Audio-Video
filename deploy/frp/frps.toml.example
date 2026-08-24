@@ -1,0 +1,15 @@
+# frps runs on the public VPS. This template targets frp 0.68.x.
+bindAddr = "0.0.0.0"
+bindPort = 7000
+
+# Store the same random token in /etc/frp/server_token and client_token.
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/frp/server_token"
+
+# Refuse legacy plaintext frpc control connections.
+transport.tls.force = true
+
+# Do not let an authenticated frpc allocate arbitrary public ports.
+allowPorts = [
+  { single = 18000 }
+]

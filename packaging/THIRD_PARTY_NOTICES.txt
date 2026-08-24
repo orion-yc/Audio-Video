@@ -1,0 +1,17 @@
+Third-party notices
+===================
+
+This package uses the FFmpeg shared libraries for H.264 video encoding and
+decoding. The bundled FFmpeg libraries are licensed under the GNU Lesser
+General Public License, version 3. A copy is included at:
+
+  THIRD_PARTY_LICENSES\FFmpeg-LGPL-3.0.txt
+
+FFmpeg source code and build information are available from:
+
+  https://github.com/BtbN/FFmpeg-Builds
+  https://ffmpeg.org/
+
+The application links to FFmpeg through replaceable shared DLLs. NVIDIA NVENC
+uses the NVIDIA display driver installed on the computer. OpenH264 is used as
+the software fallback encoder.

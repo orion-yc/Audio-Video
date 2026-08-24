@@ -1,0 +1,62 @@
+# Qt Creator local project settings
+*.pro.user*
+*.creator.user
+*.creator.user.*
+.qtcreator/
+
+# qmake / Qt generated files
+.qmake.stash
+.qmake.cache
+Makefile
+Makefile.*
+object_script.*
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*_resource.rc
+
+# Compiler output and build directories
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.d
+*.gcda
+*.gcno
+*.gcov
+/debug/
+/release/
+/build/
+/build-*/
+/build-qt6/
+
+# Deployment output, installers, and packaging logs
+/dist/
+/packaging/build-*.log
+
+# Downloaded FFmpeg SDKs. The release script expects the LGPL shared build
+# under third_party when producing a local installer.
+/third_party/ffmpeg-*/
+/third_party-ffmpeg*.zip
+/third_party-ffmpeg*.7z
+
+# Local server credentials. Keep the checked-in example file instead.
+/deploy/meeting-server.env
+
+# IDE / operating-system files
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+/usershow - 副本.*
+.DS_Store
+Thumbs.db
+desktop.ini
