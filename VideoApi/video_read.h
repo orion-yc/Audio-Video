@@ -32,6 +32,7 @@ private:
     QTimer *m_timer;
     int m_captureFrameRate;
     int m_funnyPic;
+    bool m_faceDetectionReady;
     QImage m_tuer;
     QImage m_hat;
     std::vector<Rect> m_vecLastFace;

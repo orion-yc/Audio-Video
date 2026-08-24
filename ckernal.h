@@ -165,6 +165,7 @@ private:
     void stopLocalVideo();
     void clearUserVideo(int userId);
     QImage builtInAvatar(int iconid) const;
+    void applyOwnAvatar(const QImage &avatar);
     void updateOwnRoomAvatar(const QImage &avatar);
     void beginRoomRequest(RoomRequest request, int roomId = 0);
     void clearRoomRequest();
@@ -234,6 +235,8 @@ private:
     bool                            m_profileSavePending;
     QByteArray                      m_pendingProfileAvatarData;
     bool                            m_pendingProfileAvatarChanged;
+    QByteArray                      m_pendingAvatarUploadData;
+    bool                            m_avatarUploadPending = false;
     QString                         m_registerDraftTel;
     QString                         m_registerDraftPassword;
     QString                         m_registerDraftNickname;

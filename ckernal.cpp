@@ -807,6 +807,22 @@ void CKernal::slot_dealAvatarUploadRs(uint socket, char *buf, int nlen)
         return;
     }
     if (rs->m_result == 0) {
+        if (m_avatarUploadPending) {
+            if (m_pendingAvatarUploadData.isEmpty()) {
+                m_userAvatar = QImage();
+                m_demoDialog->slot_setInfo(m_name, m_userIconId);
+                updateOwnRoomAvatar(builtInAvatar(m_userIconId));
+            } else {
+                QImage avatar;
+                if (avatar.loadFromData(m_pendingAvatarUploadData, "JPG")) {
+                    // A confirmed upload should be visible immediately instead
+                    // of waiting for the next avatar fetch round trip.
+                    applyOwnAvatar(avatar);
+                }
+            }
+        }
+        m_avatarUploadPending = false;
+        m_pendingAvatarUploadData.clear();
         requestAvatar(m_userid);
         QMessageBox::information(m_setUserDialog, "提示", "用户资料已保存，头像上传成功");
         return;
@@ -835,6 +851,8 @@ void CKernal::slot_dealAvatarUploadRs(uint socket, char *buf, int nlen)
     }
     qWarning() << "Avatar upload rejected by server:" << rs->m_result
                << "for user" << rs->m_UserID;
+    m_avatarUploadPending = false;
+    m_pendingAvatarUploadData.clear();
     QMessageBox::warning(m_setUserDialog, "头像上传失败", message);
     if (rs->m_result == 1 || rs->m_result == 2) {
         beginControlRecovery();
@@ -860,7 +878,10 @@ void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
 
     if (rs->m_imageSize == 0) {
         if (rs->m_TargetUserID == m_userid) {
+            m_avatarUploadPending = false;
+            m_pendingAvatarUploadData.clear();
             m_userAvatar = QImage();
+            m_demoDialog->slot_setInfo(m_name, m_userIconId);
             updateOwnRoomAvatar(builtInAvatar(m_userIconId));
         }
         return;
@@ -878,9 +899,9 @@ void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
     }
 
     if (rs->m_TargetUserID == m_userid) {
-        m_userAvatar = avatar;
-        m_demoDialog->slot_setAvatarImage(avatar);
-        m_setUserDialog->slot_setAvatarImage(avatar);
+        m_avatarUploadPending = false;
+        m_pendingAvatarUploadData.clear();
+        applyOwnAvatar(avatar);
     }
     const auto user = m_mapIDToUserShow.find(rs->m_TargetUserID);
     if (user != m_mapIDToUserShow.end()) {
@@ -992,7 +1013,13 @@ bool CKernal::sendAvatarUpload(const QByteArray &avatarData)
     if (!avatarData.isEmpty()) {
         memcpy(packet.data() + sizeof(header), avatarData.constData(), avatarData.size());
     }
-    return sendControlPacket(packet.constData(), packet.size());
+    if (!sendControlPacket(packet.constData(), packet.size())) {
+        return false;
+    }
+
+    m_pendingAvatarUploadData = avatarData;
+    m_avatarUploadPending = true;
+    return true;
 }
 
 // 退出房间
@@ -1136,6 +1163,18 @@ QImage CKernal::builtInAvatar(int iconid) const
     QImage avatar;
     avatar.load(QString(":/tx/%1.png").arg(qBound(0, iconid, 35)));
     return avatar;
+}
+
+void CKernal::applyOwnAvatar(const QImage &avatar)
+{
+    if (avatar.isNull()) {
+        return;
+    }
+
+    m_userAvatar = avatar;
+    m_demoDialog->slot_setAvatarImage(avatar);
+    m_setUserDialog->slot_setAvatarImage(avatar);
+    updateOwnRoomAvatar(avatar);
 }
 
 void CKernal::updateOwnRoomAvatar(const QImage &avatar)
@@ -1600,6 +1639,8 @@ void CKernal::resetAuthenticationState()
     m_userid = 0;
     memset(m_sessionToken, 0, sizeof(m_sessionToken));
     clearPendingProfileSave();
+    m_pendingAvatarUploadData.clear();
+    m_avatarUploadPending = false;
 }
 
 void CKernal::scheduleControlReconnect()

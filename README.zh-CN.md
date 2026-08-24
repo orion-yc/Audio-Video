@@ -66,13 +66,13 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.5
+.\packaging\build-release.ps1 -Version 1.0.6
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist` 目录会生成：
 
-- `Audio-Video-Setup-1.0.5.exe`
-- `Audio-Video-Portable-1.0.5.zip`
+- `Audio-Video-Setup-1.0.6.exe`
+- `Audio-Video-Portable-1.0.6.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 

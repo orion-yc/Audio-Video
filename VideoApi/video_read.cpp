@@ -6,6 +6,7 @@ CameraCaptureWorker::CameraCaptureWorker()
     : m_timer(nullptr)
     , m_captureFrameRate(CAMERA_FRAME_RATE)
     , m_funnyPic(0)
+    , m_faceDetectionReady(false)
     , m_tuer(":/images/tuer.png")
     , m_hat(":/images/hat.png")
 {
@@ -21,7 +22,6 @@ void CameraCaptureWorker::start()
         return;
     }
 
-    MyFaceDetect::FaceDetectInit();
     if (!m_capture.open(0, cv::CAP_DSHOW)) {
         m_capture.release();
         m_capture.open(0);
@@ -49,6 +49,7 @@ void CameraCaptureWorker::start()
         connect(m_timer, &QTimer::timeout, this, &CameraCaptureWorker::slot_readMore);
     }
     m_timer->start(qMax(1, 1000 / m_captureFrameRate));
+    QTimer::singleShot(0, this, &CameraCaptureWorker::slot_readMore);
     Q_EMIT SIG_captureStateChanged(true);
 }
 
@@ -69,6 +70,12 @@ void CameraCaptureWorker::pause()
 
 void CameraCaptureWorker::setFunnyPic(int funnyPic)
 {
+    if (funnyPic != 0 && !m_faceDetectionReady) {
+        // Normal camera use does not need cascade loading. Defer it until an
+        // effect actually needs face detection.
+        MyFaceDetect::FaceDetectInit();
+        m_faceDetectionReady = true;
+    }
     m_funnyPic = funnyPic;
 }
 
@@ -82,6 +89,10 @@ void CameraCaptureWorker::slot_readMore()
     cvtColor(frame, frame, cv::COLOR_BGR2RGB);
     std::vector<Rect> faces;
     if (m_funnyPic) {
+        if (!m_faceDetectionReady) {
+            MyFaceDetect::FaceDetectInit();
+            m_faceDetectionReady = true;
+        }
         MyFaceDetect::detectAndDisplay(frame, faces);
     }
 
