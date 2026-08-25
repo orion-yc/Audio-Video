@@ -3,7 +3,6 @@
 #include <QCryptographicHash>
 #include <QMessageBox>
 #include <QNetworkProxy>
-#include "md5.h"
 
 // 通过宏定义化简
 #define NetMap(x) m_netMap[x - DEF_PACK_BASE]
@@ -115,18 +114,6 @@ void CKernal::initConfig()
 
 
 }
-#define MD5_KEY "1234"
-/// MD5拼凑规则
-/// passwd_1234
-
-static std::string GetMD5(QString str)
-{
-    std::string temp = QString("%1_%2").arg(str).arg(MD5_KEY).toStdString();
-    MD5 md5(temp);
-    return md5.toString();
-}
-
-
 CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_controlSocket(new QTcpSocket(this))
   ,m_controlReconnectTimer(new QTimer(this))
@@ -619,15 +606,6 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
     // Audio and video have their own channels. They receive the same complete
     // token only after the control connection has authenticated this user.
     ensureAvConnections();
-    STRU_AUDIO_REGISTER audiorq;
-    audiorq.m_userid = m_userid;
-    memcpy(audiorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
-    slot_clientAudioSendData(0, reinterpret_cast<char*>(&audiorq), sizeof(audiorq));
-
-    STRU_VIDEO_REGISTER videorq;
-    videorq.m_userid = m_userid;
-    memcpy(videorq.m_sessionToken, m_sessionToken, sizeof(m_sessionToken));
-    slot_clientVideoSendData(0, reinterpret_cast<char*>(&videorq), sizeof(videorq));
     QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
 
@@ -718,23 +696,7 @@ void CKernal::slot_dealRoomMemberRq(uint socket, char *buf, int nlen)
     if (m_roomid == 0 && m_roomRequest == RoomRequest::None) return;
 
     const STRU_ROOM_MEMBER_RQ* rq = reinterpret_cast<STRU_ROOM_MEMBER_RQ*>(buf);
-
-    const QString userName = QString::fromStdString(rq->m_szUser);
-    const auto existing = m_mapIDToUserShow.find(rq->m_UserID);
-    if (existing != m_mapIDToUserShow.end()) {
-        existing->second->slot_setInfo(rq->m_UserID, userName);
-        return;
-    }
-
-    UserShow* user = new UserShow;
-    user->slot_setInfo(rq->m_UserID, userName);
-    connect(user, SIGNAL(SIG_userClicked(int,QString)),
-            m_roomDialog, SLOT(slot_setBigImageInfo(int,QString)));
-    m_mapIDToUserShow[rq->m_UserID] = user;
-    m_roomDialog->slot_addUser(user);
-
-    m_mapIDToAudioWrite[rq->m_UserID] = new Audio_Write;
-    requestAvatar(rq->m_UserID);
+    ensureRemoteParticipant(rq->m_UserID, QString::fromStdString(rq->m_szUser));
 }
 
 void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
@@ -1158,6 +1120,32 @@ void CKernal::slot_cameraStateChanged(bool active)
     }
 }
 
+void CKernal::ensureRemoteParticipant(int userId, const QString &name)
+{
+    if (userId <= 0 || userId == m_userid) {
+        return;
+    }
+
+    const auto existing = m_mapIDToUserShow.find(userId);
+    if (existing != m_mapIDToUserShow.end()) {
+        if (!name.isEmpty()) {
+            existing->second->slot_setInfo(userId, name);
+        }
+    } else {
+        UserShow *user = new UserShow;
+        user->slot_setInfo(userId, name.isEmpty() ? QString("用户 %1").arg(userId) : name);
+        connect(user, SIGNAL(SIG_userClicked(int,QString)),
+                m_roomDialog, SLOT(slot_setBigImageInfo(int,QString)));
+        m_mapIDToUserShow[userId] = user;
+        m_roomDialog->slot_addUser(user);
+        requestAvatar(userId);
+    }
+
+    if (m_mapIDToAudioWrite.count(userId) == 0) {
+        m_mapIDToAudioWrite[userId] = new Audio_Write;
+    }
+}
+
 QImage CKernal::builtInAvatar(int iconid) const
 {
     QImage avatar;
@@ -1442,6 +1430,9 @@ void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
     if (m_roomid == 0 || roomid != m_roomid) {
         return;
     }
+    if (userid == m_userid) {
+        return;
+    }
 
     tmp += sizeof(int);
 
@@ -1454,6 +1445,7 @@ void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
     int audioLen = nlen - 7*sizeof(int);
     // 音频数据
     QByteArray ba(tmp, audioLen);
+    ensureRemoteParticipant(userid);
     if(m_mapIDToAudioWrite.count(userid) > 0){
         Audio_Write* aw = m_mapIDToAudioWrite[userid];
         aw->slot_net_rx(ba);
@@ -1491,6 +1483,9 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     const int imageLen = nlen - 7*sizeof(int);
     if (m_roomid == 0 || roomid != m_roomid) {
         return;
+    }
+    if (userid != m_userid) {
+        ensureRemoteParticipant(userid);
     }
     if (imageLen == 0) {
         m_mapIDToVideoDecoder.erase(userid);
@@ -1590,24 +1585,65 @@ void CKernal::ensureControlConnection()
 void CKernal::ensureAvConnections()
 {
     for (int i = 0; i < 2; ++i) {
-        if (m_tcpAV[i]) {
-            continue;
-        }
+        ensureAvChannelReady(i);
+    }
+}
 
-        m_tcpAV[i] = new TcpClientMediator;
-        if (i == 0) {
-            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+bool CKernal::ensureAvChannelReady(int channel)
+{
+    if (channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
+            !hasValidSessionToken(m_sessionToken)) {
+        return false;
+    }
+
+    if (!m_tcpAV[channel]) {
+        m_tcpAV[channel] = new TcpClientMediator;
+        if (channel == 0) {
+            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
                     this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
         } else {
-            connect(m_tcpAV[i], SIGNAL(SIG_ReadyData(uint,char*,int)),
+            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
                     this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
         }
+        connect(m_tcpAV[channel], &INetMediator::SIG_disConnect, this,
+                [this, channel]() { m_avChannelRegistered[channel].store(false); });
+    }
 
-        if (!m_tcpAV[i]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort)) {
-            qWarning() << "Unable to open" << (i == 0 ? "audio" : "video")
-                       << "channel after control login.";
+    if (!m_tcpAV[channel]->IsConnected()) {
+        m_avChannelRegistered[channel].store(false);
+        m_tcpAV[channel]->CloseNet();
+        if (!m_tcpAV[channel]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort)) {
+            qWarning() << "Unable to reconnect" << (channel == 0 ? "audio" : "video")
+                       << "channel.";
+            return false;
         }
     }
+
+    if (m_avChannelRegistered[channel].load()) {
+        return true;
+    }
+
+    bool registered = false;
+    if (channel == 0) {
+        STRU_AUDIO_REGISTER request;
+        request.m_userid = m_userid;
+        memcpy(request.m_sessionToken, m_sessionToken, sizeof(request.m_sessionToken));
+        registered = m_tcpAV[channel]->SendData(0, reinterpret_cast<char*>(&request),
+                                                sizeof(request));
+    } else {
+        STRU_VIDEO_REGISTER request;
+        request.m_userid = m_userid;
+        memcpy(request.m_sessionToken, m_sessionToken, sizeof(request.m_sessionToken));
+        registered = m_tcpAV[channel]->SendData(0, reinterpret_cast<char*>(&request),
+                                                sizeof(request));
+    }
+
+    m_avChannelRegistered[channel].store(registered);
+    if (!registered) {
+        qWarning() << "Unable to register" << (channel == 0 ? "audio" : "video")
+                   << "channel.";
+    }
+    return registered;
 }
 
 void CKernal::sendPendingLogin()
@@ -1641,6 +1677,8 @@ void CKernal::resetAuthenticationState()
     clearPendingProfileSave();
     m_pendingAvatarUploadData.clear();
     m_avatarUploadPending = false;
+    m_avChannelRegistered[0].store(false);
+    m_avChannelRegistered[1].store(false);
 }
 
 void CKernal::scheduleControlReconnect()
@@ -1719,15 +1757,21 @@ bool CKernal::slot_clientSendData(uint socket, char *buf, int nlen)
 
 void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
 {
-    if (m_tcpAV[0]) {
-        m_tcpAV[0]->SendData(socket, buf, nlen);
+    if (!ensureAvChannelReady(0)) {
+        return;
+    }
+    if (!m_tcpAV[0]->SendData(socket, buf, nlen)) {
+        m_avChannelRegistered[0].store(false);
     }
 }
 
 void CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
 {
-    if (m_tcpAV[1]) {
-        m_tcpAV[1]->SendData(socket, buf, nlen);
+    if (!ensureAvChannelReady(1)) {
+        return;
+    }
+    if (!m_tcpAV[1]->SendData(socket, buf, nlen)) {
+        m_avChannelRegistered[1].store(false);
     }
 }
 
@@ -1771,13 +1815,13 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
                                   int iconid, QByteArray avatarData, bool avatarChanged)
 {
-    // 提取手机号 密码
     const QByteArray telUtf8 = tel.toUtf8();
-    const std::string passwordHash = GetMD5(passwd);
-    // 写入协议包，网络发送
+    const QByteArray passwordHash = QCryptographicHash::hash(
+                passwd.toUtf8(), QCryptographicHash::Md5).toHex();
     STRU_REGISTER_RQ rq;
     strncpy(rq.tel, telUtf8.constData(), sizeof(rq.tel) - 1);
-    strncpy(rq.password, passwordHash.c_str(), sizeof(rq.password) - 1);
+    Q_ASSERT(passwordHash.size() == 32);
+    memcpy(rq.password, passwordHash.constData(), passwordHash.size());
 
     m_registerDraftTel = tel;
     m_registerDraftPassword = passwd;

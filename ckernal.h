@@ -164,6 +164,7 @@ private:
     void sendVideoStopFrame();
     void stopLocalVideo();
     void clearUserVideo(int userId);
+    void ensureRemoteParticipant(int userId, const QString &name = QString());
     QImage builtInAvatar(int iconid) const;
     void applyOwnAvatar(const QImage &avatar);
     void updateOwnRoomAvatar(const QImage &avatar);
@@ -177,6 +178,7 @@ private:
                            const QByteArray& avatarData, bool avatarChanged);
     void ensureControlConnection();
     void ensureAvConnections();
+    bool ensureAvChannelReady(int channel);
     void sendPendingLogin();
     void sendPendingRegistration();
     void resetAuthenticationState();
@@ -221,6 +223,7 @@ private:
 
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频
+    std::atomic_bool                m_avChannelRegistered[2] = { false, false };
     QTcpSocket*                     m_latencySocket;
     QTimer*                         m_latencyTimer;
     QTimer*                         m_latencyTimeoutTimer;

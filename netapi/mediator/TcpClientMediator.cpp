@@ -33,22 +33,13 @@ void TcpClientMediator::CloseNet()
 bool TcpClientMediator::SendData( unsigned int lSendIP , char* buf , int nlen )
 {
     Q_UNUSED(lSendIP);
-    if( IsConnected() )
-        return m_pNet->SendData( 0 , buf, nlen);
-    else
-    {
-        m_pNet->UnInitNet();
-        delete m_pNet;
-        m_pNet = new TcpClient(this);
-        if( this->OpenNet( m_szBufIP , m_port ) )
-        {
-            return m_pNet->SendData( 0,buf,nlen);
-        }
-        else
-        {
-            return false;
-        }
+    // Channel registration is owned by CKernal. Do not reconnect here and
+    // send a media packet first, because the server would not know which user
+    // the fresh socket belongs to.
+    if (!IsConnected()) {
+        return false;
     }
+    return m_pNet->SendData(0, buf, nlen);
 }
 #include<iostream>
 //处理 

@@ -356,6 +356,11 @@ struct STRU_VIDEO_REGISTER
     char m_sessionToken[SESSION_TOKEN_SIZE];
 };
 
+static_assert(sizeof(STRU_AUDIO_REGISTER) == 44,
+              "Audio registration protocol layout must remain 44 bytes.");
+static_assert(sizeof(STRU_VIDEO_REGISTER) == 44,
+              "Video registration protocol layout must remain 44 bytes.");
+
 // 数据库
 /*
 	表1 用户表 id->唯一标识 tel  password  name  iconid   feeling 也可以写成两张表 登录和用户信息
