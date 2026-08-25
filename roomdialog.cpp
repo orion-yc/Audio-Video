@@ -1,6 +1,9 @@
 #include "roomdialog.h"
 #include "ui_roomdialog.h"
 
+#include <QComboBox>
+#include <QLabel>
+
 RoomDialog::RoomDialog(QWidget *parent) :
     CustomMoveDialog(parent),
     ui(new Ui::RoomDialog),
@@ -19,7 +22,7 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->horizontalLayout_3->setStretch(0, 1);
     ui->horizontalLayout_3->setStretch(1, 0);
     ui->horizontalLayout_2->setContentsMargins(18, 12, 18, 12);
-    ui->horizontalLayout_2->setSpacing(18);
+    ui->horizontalLayout_2->setSpacing(10);
     ui->sa_userList->setFixedWidth(264);
     ui->pb_quit->setFixedSize(86, 36);
     ui->cbx_moji->setFixedWidth(108);
@@ -29,6 +32,39 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->pb_close->setToolTip("退出会议");
 
     ui->horizontalLayout->insertWidget(0, m_latencyLabel);
+
+    auto *qualityLabel = new QLabel("画质", this);
+    qualityLabel->setMinimumHeight(28);
+    m_deskResolutionCombo = new QComboBox(this);
+    m_deskResolutionCombo->setMinimumHeight(28);
+    m_deskResolutionCombo->setFixedWidth(88);
+    m_deskResolutionCombo->setToolTip("选择桌面共享的最大输出分辨率");
+    m_deskResolutionCombo->addItem("720p", QSize(1280, 720));
+    m_deskResolutionCombo->addItem("1080p", QSize(1920, 1080));
+    m_deskResolutionCombo->addItem("1440p", QSize(2560, 1440));
+    m_deskResolutionCombo->addItem("4K", QSize(3840, 2160));
+    m_deskResolutionCombo->setCurrentIndex(2);
+
+    auto *frameRateLabel = new QLabel("FPS", this);
+    frameRateLabel->setMinimumHeight(28);
+    m_deskFrameRateCombo = new QComboBox(this);
+    m_deskFrameRateCombo->setMinimumHeight(28);
+    m_deskFrameRateCombo->setFixedWidth(72);
+    m_deskFrameRateCombo->setToolTip("选择桌面共享帧率");
+    m_deskFrameRateCombo->addItem("15 FPS", 15);
+    m_deskFrameRateCombo->addItem("30 FPS", 30);
+    m_deskFrameRateCombo->addItem("60 FPS", 60);
+    m_deskFrameRateCombo->setCurrentIndex(2);
+
+    int desktopControlIndex = ui->horizontalLayout_2->indexOf(ui->cb_desk) + 1;
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex++, qualityLabel);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex++, m_deskResolutionCombo);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex++, frameRateLabel);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex, m_deskFrameRateCombo);
+    connect(m_deskResolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { emitDesktopShareSettings(); });
+    connect(m_deskFrameRateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { emitDesktopShareSettings(); });
 
     m_userLayout = new QVBoxLayout;
 
@@ -96,6 +132,19 @@ void RoomDialog::slot_setRoomClear()
     Q_EMIT SIG_audioClose();
     Q_EMIT SIG_captureClose();
     Q_EMIT SIG_deskClose();
+}
+
+void RoomDialog::emitDesktopShareSettings()
+{
+    if (!m_deskResolutionCombo || !m_deskFrameRateCombo) {
+        return;
+    }
+
+    const QSize resolution = m_deskResolutionCombo->currentData().toSize();
+    const int frameRate = m_deskFrameRateCombo->currentData().toInt();
+    if (resolution.width() > 0 && resolution.height() > 0 && frameRate > 0) {
+        Q_EMIT SIG_desktopShareSettingsChanged(resolution.width(), resolution.height(), frameRate);
+    }
 }
 
 void RoomDialog::slot_setBigImage(int userid, QImage &img)
@@ -234,6 +283,7 @@ void RoomDialog::on_cb_desk_clicked()
 
         // 发信号
         // 桌面开启，摄像头关闭
+        emitDesktopShareSettings();
         Q_EMIT SIG_captureClose();
         Q_EMIT SIG_deskOpen();
     }else{

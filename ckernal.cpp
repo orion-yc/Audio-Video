@@ -41,6 +41,9 @@ namespace {
 constexpr int kMinimumRoomId = 100000;
 constexpr int kMaximumRoomId = 999999;
 constexpr int kRoomRequestTimeoutMs = 8000;
+constexpr qint64 kDesktopReferencePixelsPerSecond =
+        static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
+constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
 
 bool isValidRoomId(int roomId)
 {
@@ -123,6 +126,10 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_videoEncodeBusy(false)
   ,m_videoStreamGeneration(0)
   ,m_activeVideoSource(VideoSource::None)
+  ,m_desktopWidth(DESKTOP_IMAGE_WIDTH)
+  ,m_desktopHeight(DESKTOP_IMAGE_HEIGHT)
+  ,m_desktopFrameRate(DESKTOP_FRAME_RATE)
+  ,m_desktopBitRate(DESKTOP_VIDEO_BITRATE)
   ,m_latencySocket(new QTcpSocket(this))
     ,m_latencyTimer(new QTimer(this))
     ,m_latencyTimeoutTimer(new QTimer(this))
@@ -236,6 +243,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_deskOpen()));
     connect(m_roomDialog, SIGNAL(SIG_deskClose()),
             this, SLOT(slot_deskClose()));
+    connect(m_roomDialog, SIGNAL(SIG_desktopShareSettingsChanged(int,int,int)),
+            this, SLOT(slot_setDesktopShareSettings(int,int,int)));
 
     connect(m_roomDialog, SIGNAL(SIG_setFunnyPic(int)),
             this, SLOT(slot_setFunnyPic(int)));
@@ -1113,6 +1122,39 @@ void CKernal::slot_deskClose()
     }
 }
 
+int CKernal::desktopShareBitRate(int width, int height, int frameRate) const
+{
+    const qint64 pixelsPerSecond = static_cast<qint64>(width) * height * frameRate;
+    const qint64 requestedBitRate = static_cast<qint64>(DESKTOP_VIDEO_BITRATE)
+            * pixelsPerSecond / kDesktopReferencePixelsPerSecond;
+    return static_cast<int>(qBound(kMinimumDesktopVideoBitRate, requestedBitRate,
+                                   static_cast<qint64>(DESKTOP_MAX_VIDEO_BITRATE)));
+}
+
+void CKernal::slot_setDesktopShareSettings(int width, int height, int frameRate)
+{
+    const bool supportedResolution = (width == 1280 && height == 720)
+            || (width == 1920 && height == 1080)
+            || (width == 2560 && height == 1440)
+            || (width == 3840 && height == 2160);
+    const bool supportedFrameRate = frameRate == 15 || frameRate == 30 || frameRate == 60;
+    if (!supportedResolution || !supportedFrameRate) {
+        return;
+    }
+
+    const bool changed = m_desktopWidth != width || m_desktopHeight != height
+            || m_desktopFrameRate != frameRate;
+    m_desktopWidth = width;
+    m_desktopHeight = height;
+    m_desktopFrameRate = frameRate;
+    m_desktopBitRate = desktopShareBitRate(width, height, frameRate);
+    m_deskRead->setCaptureSettings(width, height, frameRate);
+
+    if (changed && m_activeVideoSource == VideoSource::Desktop) {
+        Q_EMIT SIG_resetVideoEncoder();
+    }
+}
+
 void CKernal::slot_cameraStateChanged(bool active)
 {
     if (!active && m_activeVideoSource == VideoSource::Camera) {
@@ -1371,7 +1413,7 @@ void CKernal::slot_sendCameraVideoFrame(QImage img)
 void CKernal::slot_sendDesktopVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Desktop) {
-        queueVideoFrame(img, DESKTOP_FRAME_RATE, DESKTOP_VIDEO_BITRATE);
+        queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate);
     }
 }
 

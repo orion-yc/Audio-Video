@@ -114,6 +114,7 @@ public slots:
     void slot_captureClose();
     void slot_deskOpen();
     void slot_deskClose();
+    void slot_setDesktopShareSettings(int width, int height, int frameRate);
 
     void slot_sendAudioFrame(QByteArray &ba );
     void slot_refleshVideoImage(QImage img);
@@ -185,6 +186,7 @@ private:
     void beginControlRecovery();
     void scheduleControlReconnect();
     void clearPendingProfileSave();
+    int desktopShareBitRate(int width, int height, int frameRate) const;
 
     PFUN                            m_netMap[DEF_PACK_COUNT];
     LoginDialog*                    m_loginDialog;
@@ -220,6 +222,10 @@ private:
     std::atomic_bool                 m_videoEncodeBusy;
     quint64                          m_videoStreamGeneration;
     VideoSource                      m_activeVideoSource;
+    int                              m_desktopWidth;
+    int                              m_desktopHeight;
+    int                              m_desktopFrameRate;
+    int                              m_desktopBitRate;
 
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频

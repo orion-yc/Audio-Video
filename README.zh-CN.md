@@ -11,7 +11,7 @@ Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项�
 - 在房间内使用摄像头或桌面共享，并可在两者之间切换。
 - 使用 H.264 视频编码，优先使用 NVIDIA NVENC；不可用时自动回退到 OpenH264 软件编码。
 - 使用 Speex 进行语音传输，并提供连接延迟显示。
-- 桌面共享目标为最高 2560 x 1440、60 fps；摄像头采集目标为最高 1920 x 1080、60 fps。实际画质会受到采集源、显卡、CPU、网络和接收端设备的共同影响。
+- 桌面共享可由共享者选择 720p、1080p、1440p、4K，以及 15、30、60 fps；客户端会自动匹配最高 56 Mbps 的 H.264 码率。摄像头采集目标为最高 1920 x 1080、60 fps。实际画质会受到采集源、显卡、CPU、网络和接收端设备的共同影响。
 
 ## 运行要求
 
@@ -46,7 +46,7 @@ port=8000
 
 ### 服务端兼容性
 
-服务端负责房间和媒体包转发，不对视频重新编码。它需要保持现有的 TCP 外层长度帧，并原样转发 H.264 负载。自定义头像还依赖控制连接上的会话令牌校验，以及协议号 `10016` 至 `10019` 的上传、获取处理。
+服务端负责房间和媒体包转发，不对视频重新编码。它需要保持现有的 TCP 外层长度帧、原样转发 H.264 负载，并允许最高 8 MiB 的媒体包，以支持 4K 桌面共享。自定义头像还依赖控制连接上的会话令牌校验，以及协议号 `10016` 至 `10019` 的上传、获取处理。
 
 ## 从源码构建
 
@@ -66,13 +66,13 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.7
+.\packaging\build-release.ps1 -Version 1.0.8
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist` 目录会生成：
 
-- `Audio-Video-Setup-1.0.7.exe`
-- `Audio-Video-Portable-1.0.7.zip`
+- `Audio-Video-Setup-1.0.8.exe`
+- `Audio-Video-Portable-1.0.8.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 

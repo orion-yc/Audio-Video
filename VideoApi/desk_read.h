@@ -38,6 +38,7 @@ signals:
 public slots:
     void start();
     void pause();
+    void setCaptureSettings(int maxWidth, int maxHeight, int frameRate);
     void slot_scheduleFrame();
     void slot_getScreenFrame();
 private:
@@ -45,6 +46,9 @@ private:
     QSharedPointer<DeskReadThread> m_deskReadThread;
     std::atomic_bool m_capturing;
     std::atomic_bool m_frameQueued;
+    std::atomic_int m_maxWidth;
+    std::atomic_int m_maxHeight;
+    std::atomic_int m_frameRate;
 };
 
 // 需要 输出 截屏(qt) -> 信号形式输出

@@ -6,7 +6,7 @@
 #define _DEF_BUFFER  ( 4096 )
 #define _DEF_CONTENT_SIZE	(1024)
 #define _MAX_SIZE	(40)
-#define _DEF_MAX_PACKET_SIZE (4 * 1024 * 1024)
+#define _DEF_MAX_PACKET_SIZE (8 * 1024 * 1024)
 #define SESSION_TOKEN_SIZE (33)
 
 //自定义协议   先写协议头 再写协议结构

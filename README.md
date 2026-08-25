@@ -11,7 +11,7 @@ Audio-Video is a Windows desktop client for small real-time video meetings. It c
 - Share a camera or desktop and switch between them while in a room.
 - H.264 video with NVIDIA NVENC selected first and an OpenH264 software fallback when NVENC is unavailable.
 - Speex voice transport and a built-in connection-latency indicator.
-- Desktop sharing targets up to 2560 x 1440 at 60 fps, while camera capture targets 1920 x 1080 at 60 fps. The delivered quality still depends on the source, GPU, CPU, network, and receiving device.
+- Desktop sharing lets the presenter choose 720p, 1080p, 1440p, or 4K and 15, 30, or 60 fps. It automatically selects a matching H.264 bitrate up to 56 Mbps; camera capture targets 1920 x 1080 at 60 fps. The delivered quality still depends on the source, GPU, CPU, network, and receiving device.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ For an Internet-facing deployment, follow [deploy/README.md](deploy/README.md). 
 
 ### Server Compatibility
 
-The server routes room and media packets and does not transcode video. It must forward H.264 payloads unchanged and support the current outer length-prefixed TCP framing. Custom avatars additionally require the avatar request types `10016` through `10019` and session-token validation on the control connection.
+The server routes room and media packets and does not transcode video. It must forward H.264 payloads unchanged, support the current outer length-prefixed TCP framing, and permit media payloads up to 8 MiB for the 4K sharing option. Custom avatars additionally require the avatar request types `10016` through `10019` and session-token validation on the control connection.
 
 ## Build From Source
 
@@ -66,13 +66,13 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.7
+.\packaging\build-release.ps1 -Version 1.0.8
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist`:
 
-- `Audio-Video-Setup-1.0.7.exe`
-- `Audio-Video-Portable-1.0.7.zip`
+- `Audio-Video-Setup-1.0.8.exe`
+- `Audio-Video-Portable-1.0.8.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 

@@ -9,6 +9,7 @@
 namespace Ui {
 class RoomDialog;
 }
+class QComboBox;
 
 // 无边框设计
 class RoomDialog : public CustomMoveDialog
@@ -23,6 +24,7 @@ signals:
     void SIG_captureClose();
     void SIG_deskOpen();
     void SIG_deskClose();
+    void SIG_desktopShareSettingsChanged(int width, int height, int frameRate);
     void SIG_setFunnyPic(int picid);
 public:
     explicit RoomDialog(QWidget *parent = nullptr);
@@ -60,8 +62,12 @@ private slots:
     void on_cbx_moji_currentIndexChanged(int index);
 
 private:
+    void emitDesktopShareSettings();
+
     Ui::RoomDialog *ui;
     LatencyLabel *m_latencyLabel;
+    QComboBox *m_deskResolutionCombo = nullptr;
+    QComboBox *m_deskFrameRateCombo = nullptr;
 
     // 用于用户列表的垂直布局
     QVBoxLayout* m_userLayout;

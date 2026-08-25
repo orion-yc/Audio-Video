@@ -4,6 +4,9 @@ Desk_Read::Desk_Read(QObject *parent) : QObject(parent)
   ,m_deskReadThread(new DeskReadThread)
   ,m_capturing(false)
   ,m_frameQueued(false)
+  ,m_maxWidth(DESKTOP_IMAGE_WIDTH)
+  ,m_maxHeight(DESKTOP_IMAGE_HEIGHT)
+  ,m_frameRate(DESKTOP_FRAME_RATE)
 {
     m_deskReadThread->setDeskRead( this);
 
@@ -25,13 +28,29 @@ void Desk_Read::start()
     if (m_capturing.exchange(true)) {
         return;
     }
-    m_timer->start(1000 / DESKTOP_FRAME_RATE);
+    m_timer->start(qMax(1, 1000 / m_frameRate.load()));
 }
 
 void Desk_Read::pause()
 {
     m_capturing.store(false);
     m_timer->stop();
+}
+
+void Desk_Read::setCaptureSettings(int maxWidth, int maxHeight, int frameRate)
+{
+    if (maxWidth <= 0 || maxWidth > DESKTOP_MAX_IMAGE_WIDTH ||
+            maxHeight <= 0 || maxHeight > DESKTOP_MAX_IMAGE_HEIGHT ||
+            frameRate <= 0 || frameRate > DESKTOP_MAX_FRAME_RATE) {
+        return;
+    }
+
+    m_maxWidth.store(maxWidth);
+    m_maxHeight.store(maxHeight);
+    m_frameRate.store(frameRate);
+    if (m_capturing.load()) {
+        m_timer->start(qMax(1, 1000 / frameRate));
+    }
 }
 
 void Desk_Read::slot_scheduleFrame()
@@ -69,9 +88,10 @@ void Desk_Read::slot_getScreenFrame()
     QPixmap map = src->grabWindow(0);
 
     QImage image = map.toImage();
-    if (image.width() > DESKTOP_IMAGE_WIDTH ||
-            image.height() > DESKTOP_IMAGE_HEIGHT) {
-        image = image.scaled(DESKTOP_IMAGE_WIDTH, DESKTOP_IMAGE_HEIGHT,
+    const int maxWidth = m_maxWidth.load();
+    const int maxHeight = m_maxHeight.load();
+    if (image.width() > maxWidth || image.height() > maxHeight) {
+        image = image.scaled(maxWidth, maxHeight,
                              Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     if (m_capturing.load() && !image.isNull()) {
