@@ -1,4 +1,4 @@
-Audio-Video MSVC 1.0.9
+Audio-Video MSVC 1.0.10
 ======================
 
 System requirements
@@ -10,12 +10,12 @@ System requirements
 
 Installation
 ------------
-Run Audio-Video-MSVC-Setup-1.0.9.exe and follow the installer prompts.
+Run Audio-Video-MSVC-Setup-1.0.10.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-MSVC-Portable-1.0.9.zip, then run Audio-Video.exe.
+Extract Audio-Video-MSVC-Portable-1.0.10.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration

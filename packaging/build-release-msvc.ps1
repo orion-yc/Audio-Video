@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.9',
+    [string]$Version = '1.0.10',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
     [string]$VcpkgRoot = '',
@@ -110,12 +110,10 @@ Assert-Tool $eyeCascade 'OpenCV eye cascade'
 Assert-Tool $faceCascade 'OpenCV face cascade'
 Copy-Item -LiteralPath $eyeCascade, $faceCascade -Destination $stageDir
 
-$openCvBin = Join-Path $vcpkgInstalled 'bin'
-$openCvDlls = Get-ChildItem -LiteralPath $openCvBin -Filter 'opencv_*.dll' -File
-if ($openCvDlls.Count -eq 0) { throw 'OpenCV runtime DLLs were not found.' }
-$openCvDlls | Copy-Item -Destination $stageDir
-Assert-Tool $speexDll 'Speex runtime'
-Copy-Item -LiteralPath $speexDll -Destination $stageDir
+$vcpkgRuntimeDir = Join-Path $vcpkgInstalled 'bin'
+$vcpkgRuntimeDlls = Get-ChildItem -LiteralPath $vcpkgRuntimeDir -Filter '*.dll' -File
+if ($vcpkgRuntimeDlls.Count -eq 0) { throw 'vcpkg runtime DLLs were not found.' }
+$vcpkgRuntimeDlls | Copy-Item -Destination $stageDir
 
 $deployCommand = 'call "{0}" -arch=x64 -host_arch=x64 && "{1}" --release --compiler-runtime --no-translations "{2}"' -f `
     $VsDevCmd, $windeployqt, (Join-Path $stageDir 'Audio-Video.exe')
@@ -154,7 +152,9 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.txt') -Dest
 
 $requiredFiles = @(
     'Audio-Video.exe', 'config.ini', 'README.txt', 'Qt6Core.dll', 'Qt6Gui.dll',
-    'Qt6Widgets.dll', 'Qt6Network.dll', 'Qt6Multimedia.dll', 'msvcp140.dll', 'speex-1.dll', 'avcodec-63.dll',
+    'Qt6Widgets.dll', 'Qt6Network.dll', 'Qt6Multimedia.dll', 'msvcp140.dll', 'speex-1.dll', 'jpeg62.dll',
+    'libpng16.dll', 'libwebp.dll', 'libwebpdecoder.dll', 'libwebpdemux.dll', 'libwebpmux.dll', 'liblzma.dll',
+    'tiff.dll', 'turbojpeg.dll', 'z.dll', 'avcodec-63.dll',
     'vcruntime140.dll', 'vcruntime140_1.dll',
     'avutil-61.dll', 'swscale-10.dll', 'THIRD_PARTY_NOTICES.txt',
     'THIRD_PARTY_LICENSES\FFmpeg-LGPL-3.0.txt', 'THIRD_PARTY_LICENSES\OpenCV-4.12.0.txt', 'haarcascade_eye.xml',
