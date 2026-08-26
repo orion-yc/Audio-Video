@@ -1,17 +1,31 @@
 #include "myfacedetect.h"
+#if !defined(_MSC_VER)
 #include <opencv2/objdetect.hpp>
+#endif
 #include<QCoreApplication>
 #include<qDebug>
 
+#if !defined(_MSC_VER)
 CascadeClassifier face_cascade;
 CascadeClassifier eyes_cascade;
 String window_name_face = "Capture - Face";
+#endif
 
 MyFaceDetect::MyFaceDetect()
 {
 
 }
 
+#if defined(_MSC_VER)
+void MyFaceDetect::FaceDetectInit()
+{
+}
+
+void MyFaceDetect::detectAndDisplay(Mat &, std::vector<Rect> &faces)
+{
+    faces.clear();
+}
+#else
 void MyFaceDetect::FaceDetectInit()
 {
     // 将 xml 文件放在 exe 同级的目录下面
@@ -100,3 +114,4 @@ void MyFaceDetect::detectAndDisplay(Mat &frame, std::vector<Rect> &faces)
    // imshow( window_name_face, frame );
 
 }
+#endif

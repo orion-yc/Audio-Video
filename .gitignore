@@ -45,6 +45,8 @@ ui_*.h
 /third_party/ffmpeg-*/
 /third_party-ffmpeg*.zip
 /third_party-ffmpeg*.7z
+/third_party/vcpkg/
+/vcpkg_installed/
 
 # Local server credentials. Keep the checked-in example file instead.
 /deploy/meeting-server.env

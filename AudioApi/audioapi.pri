@@ -1,8 +1,14 @@
 QT += multimedia
 
-SPEEX_ROOT = E:/perject/Speex-1.2.1-MinGW64/install
-INCLUDEPATH += $$SPEEX_ROOT/include
-LIBS += -L$$SPEEX_ROOT/lib -lspeex
+msvc {
+    VCPKG_ROOT = $$PWD/../third_party/vcpkg/installed/x64-windows
+    INCLUDEPATH += $$VCPKG_ROOT/include
+    LIBS += $$VCPKG_ROOT/lib/speex.lib
+} else {
+    SPEEX_ROOT = E:/perject/Speex-1.2.1-MinGW64/install
+    INCLUDEPATH += $$SPEEX_ROOT/include
+    LIBS += -L$$SPEEX_ROOT/lib -lspeex
+}
 
 
 HEADERS += \
