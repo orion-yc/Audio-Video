@@ -2,7 +2,19 @@
 #include "ui_roomdialog.h"
 
 #include <QComboBox>
+#include <QEvent>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QPushButton>
+#include <QScrollBar>
+#include <QTextBrowser>
+#include <QTextEdit>
+#include <QTextCursor>
+#include <QTime>
+#include <QToolButton>
+#include <QVBoxLayout>
 
 RoomDialog::RoomDialog(QWidget *parent) :
     CustomMoveDialog(parent),
@@ -65,6 +77,68 @@ RoomDialog::RoomDialog(QWidget *parent) :
             this, [this](int) { emitDesktopShareSettings(); });
     connect(m_deskFrameRateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int) { emitDesktopShareSettings(); });
+
+    m_chatPanel = new QFrame(this);
+    m_chatPanel->setObjectName("wdg_chatPanel");
+    m_chatPanel->setFixedWidth(320);
+    auto *chatLayout = new QVBoxLayout(m_chatPanel);
+    chatLayout->setContentsMargins(12, 12, 12, 12);
+    chatLayout->setSpacing(10);
+
+    auto *chatHeader = new QHBoxLayout;
+    auto *chatTitle = new QLabel("房间聊天", m_chatPanel);
+    chatTitle->setObjectName("lb_chatTitle");
+    auto *chatClose = new QToolButton(m_chatPanel);
+    chatClose->setObjectName("pb_chatClose");
+    chatClose->setText("X");
+    chatClose->setToolTip("收起聊天");
+    chatHeader->addWidget(chatTitle);
+    chatHeader->addStretch(1);
+    chatHeader->addWidget(chatClose);
+    chatLayout->addLayout(chatHeader);
+
+    m_chatHistory = new QTextBrowser(m_chatPanel);
+    m_chatHistory->setObjectName("tb_chatHistory");
+    m_chatHistory->setOpenExternalLinks(false);
+    m_chatHistory->setReadOnly(true);
+    m_chatHistory->setPlaceholderText("还没有消息");
+    chatLayout->addWidget(m_chatHistory, 1);
+
+    m_chatInput = new QTextEdit(m_chatPanel);
+    m_chatInput->setObjectName("te_chatInput");
+    m_chatInput->setPlaceholderText("输入消息");
+    m_chatInput->setAcceptRichText(false);
+    m_chatInput->setMaximumHeight(82);
+    m_chatInput->installEventFilter(this);
+    chatLayout->addWidget(m_chatInput);
+
+    auto *sendLayout = new QHBoxLayout;
+    auto *sendHint = new QLabel("Enter 发送", m_chatPanel);
+    sendHint->setObjectName("lb_chatHint");
+    auto *sendButton = new QPushButton("发送", m_chatPanel);
+    sendButton->setObjectName("pb_chatSend");
+    sendButton->setFixedSize(76, 34);
+    sendLayout->addWidget(sendHint);
+    sendLayout->addStretch(1);
+    sendLayout->addWidget(sendButton);
+    chatLayout->addLayout(sendLayout);
+
+    ui->horizontalLayout_3->insertWidget(1, m_chatPanel);
+    ui->horizontalLayout_3->setStretch(1, 0);
+    ui->horizontalLayout_3->setStretch(2, 0);
+    setChatPanelVisible(false);
+    connect(chatClose, &QToolButton::clicked, this,
+            [this]() { setChatPanelVisible(false); });
+    connect(sendButton, &QPushButton::clicked, this, &RoomDialog::sendChatMessage);
+
+    const int chatButtonIndex = ui->horizontalLayout_2->indexOf(ui->pb_quit);
+    m_chatButton = new QPushButton("聊天", this);
+    m_chatButton->setObjectName("pb_chatToggle");
+    m_chatButton->setFixedSize(76, 36);
+    m_chatButton->setToolTip("打开房间聊天");
+    ui->horizontalLayout_2->insertWidget(chatButtonIndex, m_chatButton);
+    connect(m_chatButton, &QPushButton::clicked, this,
+            [this]() { setChatPanelVisible(!m_chatPanel->isVisible()); });
 
     m_userLayout = new QVBoxLayout;
 
@@ -132,6 +206,99 @@ void RoomDialog::slot_setRoomClear()
     Q_EMIT SIG_audioClose();
     Q_EMIT SIG_captureClose();
     Q_EMIT SIG_deskClose();
+    if (m_chatHistory) {
+        m_chatHistory->clear();
+    }
+    m_unreadChatCount = 0;
+    updateChatButton();
+    setChatPanelVisible(false);
+}
+
+void RoomDialog::slot_appendChatMessage(int userId, const QString &name, const QString &message,
+                                        bool ownMessage)
+{
+    Q_UNUSED(userId);
+    if (!m_chatHistory || message.trimmed().isEmpty()) {
+        return;
+    }
+
+    const QString escapedName = (name.trimmed().isEmpty() ? QString("未设置昵称") : name.trimmed())
+            .toHtmlEscaped();
+    const QString escapedMessage = message.toHtmlEscaped().replace("\n", "<br/>");
+    const QString timestamp = QTime::currentTime().toString("HH:mm");
+    const QString senderColor = ownMessage ? "#FF7A80" : "#E6E8EB";
+    const QString messageColor = ownMessage ? "#FFE7E8" : "#D7DBE0";
+    m_chatHistory->append(QStringLiteral(
+        "<div style=\"margin:2px 2px 12px 2px;\">"
+        "<span style=\"color:%1;font-weight:600;\">%2</span>"
+        "<span style=\"color:#777F8B;margin-left:8px;\">%3</span><br/>"
+        "<span style=\"color:%4;\">%5</span></div>")
+        .arg(senderColor, escapedName, timestamp, messageColor, escapedMessage));
+    m_chatHistory->moveCursor(QTextCursor::End);
+    m_chatHistory->verticalScrollBar()->setValue(m_chatHistory->verticalScrollBar()->maximum());
+
+    if (!ownMessage && !m_chatPanel->isVisible()) {
+        ++m_unreadChatCount;
+        updateChatButton();
+    }
+}
+
+void RoomDialog::setChatPanelVisible(bool visible)
+{
+    if (!m_chatPanel) {
+        return;
+    }
+    m_chatPanel->setVisible(visible);
+    if (visible) {
+        m_unreadChatCount = 0;
+        updateChatButton();
+        if (m_chatInput) {
+            m_chatInput->setFocus();
+        }
+    }
+}
+
+void RoomDialog::sendChatMessage()
+{
+    if (!m_chatInput) {
+        return;
+    }
+    const QString message = m_chatInput->toPlainText().trimmed();
+    if (message.isEmpty()) {
+        return;
+    }
+    Q_EMIT SIG_chatMessageSend(message);
+}
+
+void RoomDialog::slot_clearChatInput()
+{
+    if (!m_chatInput) {
+        return;
+    }
+    m_chatInput->clear();
+}
+
+void RoomDialog::updateChatButton()
+{
+    if (!m_chatButton) {
+        return;
+    }
+    m_chatButton->setText(m_unreadChatCount > 0
+                          ? QString("聊天 %1").arg(qMin(m_unreadChatCount, 99))
+                          : QString("聊天"));
+}
+
+bool RoomDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_chatInput && event->type() == QEvent::KeyPress) {
+        const auto *keyEvent = static_cast<QKeyEvent *>(event);
+        if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) &&
+                !(keyEvent->modifiers() & Qt::ShiftModifier)) {
+            sendChatMessage();
+            return true;
+        }
+    }
+    return CustomMoveDialog::eventFilter(watched, event);
 }
 
 void RoomDialog::emitDesktopShareSettings()

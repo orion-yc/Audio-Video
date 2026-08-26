@@ -244,6 +244,58 @@ void applyAppStyle(QApplication &application)
         QScrollArea#sa_userList QWidget#scrollAreaWidgetContents,
         QWidget#wdg_userList { background: #101216; }
 
+        QFrame#wdg_chatPanel {
+            background: #101216;
+            border: 1px solid #292D33;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_chatTitle { color: #FFFFFF; font-weight: 600; }
+        QLabel#lb_chatHint { color: #777F8B; font-size: 12px; }
+
+        QTextBrowser#tb_chatHistory {
+            background: #0D0F12;
+            border: 1px solid #252A30;
+            border-radius: 4px;
+            padding: 8px;
+        }
+
+        QTextEdit#te_chatInput {
+            background: #181B20;
+            border: 1px solid #343941;
+            border-radius: 4px;
+            color: #F8FAFC;
+            padding: 7px 9px;
+        }
+
+        QTextEdit#te_chatInput:focus { border-color: #E5484D; }
+
+        QPushButton#pb_chatToggle,
+        QPushButton#pb_chatSend {
+            background: #24282E;
+            border: 1px solid #3C424B;
+            color: #F4F4F5;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
+        QPushButton#pb_chatToggle:hover,
+        QPushButton#pb_chatSend:hover {
+            background: #2A171A;
+            border-color: #E5484D;
+            color: #FFFFFF;
+        }
+
+        QToolButton#pb_chatClose {
+            background: transparent;
+            border: 0;
+            color: #A5ACB5;
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        QToolButton#pb_chatClose:hover { background: #2A2E34; color: #FFFFFF; }
+
         UserShow {
             background: #090A0C;
             border: 1px solid #2D1518;

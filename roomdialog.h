@@ -10,6 +10,11 @@ namespace Ui {
 class RoomDialog;
 }
 class QComboBox;
+class QEvent;
+class QFrame;
+class QPushButton;
+class QTextBrowser;
+class QTextEdit;
 
 // 无边框设计
 class RoomDialog : public CustomMoveDialog
@@ -26,6 +31,7 @@ signals:
     void SIG_deskClose();
     void SIG_desktopShareSettingsChanged(int width, int height, int frameRate);
     void SIG_setFunnyPic(int picid);
+    void SIG_chatMessageSend(const QString &message);
 public:
     explicit RoomDialog(QWidget *parent = nullptr);
     ~RoomDialog();
@@ -42,6 +48,9 @@ public slots:
     void slot_clearBigImage(int userid);
     void slot_setCaptureState(bool active);
     void slot_setLatency(int latencyMs);
+    void slot_appendChatMessage(int userId, const QString &name, const QString &message,
+                                bool ownMessage);
+    void slot_clearChatInput();
 private slots:
     void on_pb_close_clicked();
 
@@ -63,11 +72,22 @@ private slots:
 
 private:
     void emitDesktopShareSettings();
+    void setChatPanelVisible(bool visible);
+    void sendChatMessage();
+    void updateChatButton();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
     Ui::RoomDialog *ui;
     LatencyLabel *m_latencyLabel;
     QComboBox *m_deskResolutionCombo = nullptr;
     QComboBox *m_deskFrameRateCombo = nullptr;
+    QFrame *m_chatPanel = nullptr;
+    QTextBrowser *m_chatHistory = nullptr;
+    QTextEdit *m_chatInput = nullptr;
+    QPushButton *m_chatButton = nullptr;
+    int m_unreadChatCount = 0;
 
     // 用于用户列表的垂直布局
     QVBoxLayout* m_userLayout;

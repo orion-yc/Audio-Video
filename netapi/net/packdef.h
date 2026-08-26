@@ -47,8 +47,11 @@
 #define DEF_PACK_AVATAR_UPLOAD_RS (DEF_PACK_BASE + 17)
 #define DEF_PACK_AVATAR_FETCH_RQ  (DEF_PACK_BASE + 18)
 #define DEF_PACK_AVATAR_DATA_RS   (DEF_PACK_BASE + 19)
+// 房间公共文字聊天，使用已认证的主控制连接。
+#define DEF_PACK_ROOM_CHAT_MESSAGE (DEF_PACK_BASE + 20)
 
 #define DEF_AVATAR_IMAGE_MAX_SIZE (256 * 1024)
+#define DEF_ROOM_CHAT_MAX_BYTES 512
 
 
 //注册请求结果
@@ -329,6 +332,26 @@ static_assert(sizeof(STRU_AVATAR_FETCH_RQ) == 48,
               "Avatar fetch protocol layout must remain 48 bytes.");
 static_assert(sizeof(STRU_AVATAR_DATA_RS) == 16,
               "Avatar response protocol layout must remain 16 bytes.");
+
+// 房间聊天请求和下发使用同一结构。messageLength 指示 m_message 中 UTF-8
+// 文本的实际字节数，消息不携带结尾 '\0'。
+typedef struct STRU_ROOM_CHAT_MESSAGE
+{
+    STRU_ROOM_CHAT_MESSAGE()
+        : m_nType(DEF_PACK_ROOM_CHAT_MESSAGE), m_RoomID(0), m_UserID(0),
+          m_messageLength(0)
+    {
+        memset(m_message, 0, sizeof(m_message));
+    }
+    PackType m_nType;
+    int m_RoomID;
+    int m_UserID;
+    int m_messageLength;
+    char m_message[DEF_ROOM_CHAT_MAX_BYTES];
+} STRU_ROOM_CHAT_MESSAGE;
+
+static_assert(sizeof(STRU_ROOM_CHAT_MESSAGE) == 528,
+              "Room chat protocol layout must remain 528 bytes.");
 
 //注册音频
 struct STRU_AUDIO_REGISTER

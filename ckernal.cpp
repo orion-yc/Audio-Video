@@ -27,6 +27,7 @@ void CKernal::setNetMap()
     NetMap(DEF_PACK_VIDEO_FRAME)  = &CKernal::slot_dealVideoFrame;
     NetMap(DEF_PACK_AVATAR_UPLOAD_RS) = &CKernal::slot_dealAvatarUploadRs;
     NetMap(DEF_PACK_AVATAR_DATA_RS) = &CKernal::slot_dealAvatarDataRs;
+    NetMap(DEF_PACK_ROOM_CHAT_MESSAGE) = &CKernal::slot_dealRoomChatMessage;
 
 }
 
@@ -248,6 +249,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
 
     connect(m_roomDialog, SIGNAL(SIG_setFunnyPic(int)),
             this, SLOT(slot_setFunnyPic(int)));
+    connect(m_roomDialog, &RoomDialog::SIG_chatMessageSend,
+            this, &CKernal::slot_sendRoomChatMessage);
 
     connect(this, &CKernal::SIG_sendVideoFrame,
             m_sendVideoThread.get(), &SendThread::slot_threadSendData);
@@ -708,6 +711,37 @@ void CKernal::slot_dealRoomMemberRq(uint socket, char *buf, int nlen)
     ensureRemoteParticipant(rq->m_UserID, QString::fromStdString(rq->m_szUser));
 }
 
+void CKernal::slot_dealRoomChatMessage(uint socket, char *buf, int nlen)
+{
+    Q_UNUSED(socket);
+    if (nlen != static_cast<int>(sizeof(STRU_ROOM_CHAT_MESSAGE)) || m_roomid == 0) {
+        return;
+    }
+
+    const auto *message = reinterpret_cast<const STRU_ROOM_CHAT_MESSAGE *>(buf);
+    if (message->m_RoomID != m_roomid || message->m_UserID <= 0 ||
+            message->m_messageLength <= 0 ||
+            message->m_messageLength > DEF_ROOM_CHAT_MAX_BYTES ||
+            message->m_UserID == m_userid) {
+        return;
+    }
+
+    const QString text = QString::fromUtf8(message->m_message, message->m_messageLength).trimmed();
+    if (text.isEmpty()) {
+        return;
+    }
+
+    QString senderName;
+    const auto participant = m_mapIDToUserShow.find(message->m_UserID);
+    if (participant != m_mapIDToUserShow.end()) {
+        senderName = participant->second->m_name;
+    }
+    if (senderName.isEmpty()) {
+        senderName = QString("用户%1").arg(message->m_UserID);
+    }
+    m_roomDialog->slot_appendChatMessage(message->m_UserID, senderName, text, false);
+}
+
 void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
 {
     Q_UNUSED(socket);
@@ -1153,6 +1187,32 @@ void CKernal::slot_setDesktopShareSettings(int width, int height, int frameRate)
     if (changed && m_activeVideoSource == VideoSource::Desktop) {
         Q_EMIT SIG_resetVideoEncoder();
     }
+}
+
+void CKernal::slot_sendRoomChatMessage(const QString &message)
+{
+    if (m_roomid == 0 || !hasAuthenticatedControlConnection()) {
+        return;
+    }
+
+    const QString normalizedMessage = message.trimmed();
+    const QByteArray messageUtf8 = normalizedMessage.toUtf8();
+    if (messageUtf8.isEmpty() || messageUtf8.size() > DEF_ROOM_CHAT_MAX_BYTES) {
+        QMessageBox::warning(m_roomDialog, "提示", "消息不能为空且不能超过 512 个字节");
+        return;
+    }
+
+    STRU_ROOM_CHAT_MESSAGE packet;
+    packet.m_RoomID = m_roomid;
+    packet.m_UserID = m_userid;
+    packet.m_messageLength = messageUtf8.size();
+    memcpy(packet.m_message, messageUtf8.constData(), messageUtf8.size());
+    if (!sendControlPacket(reinterpret_cast<const char *>(&packet), sizeof(packet))) {
+        QMessageBox::warning(m_roomDialog, "提示", "消息发送失败，正在重新连接");
+        return;
+    }
+    m_roomDialog->slot_appendChatMessage(m_userid, m_name, normalizedMessage, true);
+    m_roomDialog->slot_clearChatInput();
 }
 
 void CKernal::slot_cameraStateChanged(bool active)

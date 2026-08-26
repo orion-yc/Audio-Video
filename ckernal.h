@@ -84,6 +84,7 @@ public slots:
     void slot_dealVideoFrame( uint socket, char* buf, int nlen);
     void slot_dealAvatarUploadRs(uint socket, char* buf, int nlen);
     void slot_dealAvatarDataRs(uint socket, char* buf, int nlen);
+    void slot_dealRoomChatMessage(uint socket, char* buf, int nlen);
 
 
     // 客户端发送数据
@@ -115,6 +116,7 @@ public slots:
     void slot_deskOpen();
     void slot_deskClose();
     void slot_setDesktopShareSettings(int width, int height, int frameRate);
+    void slot_sendRoomChatMessage(const QString &message);
 
     void slot_sendAudioFrame(QByteArray &ba );
     void slot_refleshVideoImage(QImage img);
