@@ -106,7 +106,9 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
 
     av_opt_set(context->priv_data, "repeat_headers", "1", 0);
     if (isNvenc(encoderName)) {
-        av_opt_set(context->priv_data, "preset", "p4", 0);
+        // P5 gives text and UI edges more detail than the balanced P4 preset
+        // while retaining the low-latency path used by desktop sharing.
+        av_opt_set(context->priv_data, "preset", "p5", 0);
         av_opt_set(context->priv_data, "tune", "ll", 0);
         av_opt_set(context->priv_data, "rc", "cbr", 0);
         av_opt_set(context->priv_data, "zerolatency", "1", 0);

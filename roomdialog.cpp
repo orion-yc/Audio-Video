@@ -4,11 +4,14 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QScreen>
+#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QTextCursor>
@@ -45,6 +48,11 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->pb_close->setToolTip("退出会议");
 
     ui->horizontalLayout->insertWidget(0, m_latencyLabel);
+    m_deskStatusLabel = new QLabel("共享 未开始", this);
+    m_deskStatusLabel->setObjectName("lb_deskStatus");
+    m_deskStatusLabel->setMinimumHeight(28);
+    m_deskStatusLabel->setToolTip("桌面共享的实际编码状态");
+    ui->horizontalLayout->insertWidget(1, m_deskStatusLabel);
 
     auto *qualityLabel = new QLabel("画质", this);
     qualityLabel->setMinimumHeight(28);
@@ -69,15 +77,37 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskFrameRateCombo->addItem("60 FPS", 60);
     m_deskFrameRateCombo->setCurrentIndex(2);
 
+    auto *screenLabel = new QLabel("屏幕", this);
+    screenLabel->setMinimumHeight(28);
+    m_deskScreenCombo = new QComboBox(this);
+    m_deskScreenCombo->setMinimumHeight(28);
+    m_deskScreenCombo->setFixedWidth(148);
+    m_deskScreenCombo->setToolTip("选择要共享的物理显示器");
+    refreshDesktopScreens();
+
     int desktopControlIndex = ui->horizontalLayout_2->indexOf(ui->cb_desk) + 1;
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, qualityLabel);
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, m_deskResolutionCombo);
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, frameRateLabel);
-    ui->horizontalLayout_2->insertWidget(desktopControlIndex, m_deskFrameRateCombo);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex++, m_deskFrameRateCombo);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex++, screenLabel);
+    ui->horizontalLayout_2->insertWidget(desktopControlIndex, m_deskScreenCombo);
     connect(m_deskResolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int) { emitDesktopShareSettings(); });
     connect(m_deskFrameRateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int) { emitDesktopShareSettings(); });
+    connect(m_deskScreenCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { emitDesktopShareScreen(); });
+    if (auto *guiApp = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        connect(guiApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
+            refreshDesktopScreens();
+            emitDesktopShareScreen();
+        });
+        connect(guiApp, &QGuiApplication::screenRemoved, this, [this](QScreen *) {
+            refreshDesktopScreens();
+            emitDesktopShareScreen();
+        });
+    }
 
     m_chatPanel = new QFrame(this);
     m_chatPanel->setObjectName("wdg_chatPanel");
@@ -188,6 +218,37 @@ void RoomDialog::slot_setLatency(int latencyMs)
     m_latencyLabel->setLatency(latencyMs);
 }
 
+void RoomDialog::slot_setDesktopSharePending(int frameRate, int bitRate)
+{
+    const int megaBits = qMax(1, bitRate / 1000000);
+    setDesktopShareStatusText(QString("共享 准备中 | 目标 %1 FPS | 目标 %2 Mbps")
+                              .arg(frameRate).arg(megaBits),
+                              "正在初始化桌面采集和 H.264 编码器");
+}
+
+void RoomDialog::slot_setDesktopShareStatus(int width, int height, int frameRate,
+                                            int bitRate, const QString &encoderName)
+{
+    QString encoder = "H.264";
+    if (encoderName == "h264_nvenc") {
+        encoder = "NVENC";
+    } else if (encoderName == "libopenh264") {
+        encoder = "OpenH264";
+    } else if (encoderName == "h264_mf") {
+        encoder = "Media Foundation";
+    }
+    const int megaBits = qMax(1, bitRate / 1000000);
+    setDesktopShareStatusText(QString("共享 %1x%2 | 目标 %3 FPS | 目标 %4 Mbps | %5")
+                              .arg(width).arg(height).arg(frameRate).arg(megaBits)
+                              .arg(encoder),
+                              "显示的是实际编码分辨率、目标帧率、目标码率和当前 H.264 编码器");
+}
+
+void RoomDialog::slot_clearDesktopShareStatus()
+{
+    setDesktopShareStatusText("共享 未开始", "桌面共享的实际编码状态");
+}
+
 RoomDialog::~RoomDialog()
 {
     delete ui;
@@ -220,6 +281,7 @@ void RoomDialog::slot_setRoomClear()
     Q_EMIT SIG_audioClose();
     Q_EMIT SIG_captureClose();
     Q_EMIT SIG_deskClose();
+    slot_clearDesktopShareStatus();
     if (m_chatHistory) {
         m_chatHistory->clear();
     }
@@ -330,6 +392,67 @@ void RoomDialog::emitDesktopShareSettings()
     if (resolution.width() > 0 && resolution.height() > 0 && frameRate > 0) {
         Q_EMIT SIG_desktopShareSettingsChanged(resolution.width(), resolution.height(), frameRate);
     }
+}
+
+QString RoomDialog::desktopShareScreenName() const
+{
+    return m_deskScreenCombo ? m_deskScreenCombo->currentData().toString() : QString();
+}
+
+void RoomDialog::emitDesktopShareScreen()
+{
+    const QString screenName = desktopShareScreenName();
+    if (!screenName.isEmpty()) {
+        Q_EMIT SIG_desktopShareScreenChanged(screenName);
+    }
+}
+
+void RoomDialog::refreshDesktopScreens()
+{
+    if (!m_deskScreenCombo) {
+        return;
+    }
+
+    const QString previousScreen = desktopShareScreenName();
+    QSignalBlocker blocker(m_deskScreenCombo);
+    m_deskScreenCombo->clear();
+
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    QScreen *primaryScreen = QGuiApplication::primaryScreen();
+    for (QScreen *screen : screens) {
+        if (!screen) {
+            continue;
+        }
+        const QString connectorName = screen->name();
+        const QString modelName = screen->model().trimmed();
+        const QString displayName = modelName.isEmpty() ? connectorName : modelName;
+        const QSize size = screen->size();
+        QString label = QString("%1 %2x%3")
+                .arg(displayName.isEmpty() ? "显示器" : displayName)
+                .arg(size.width()).arg(size.height());
+        if (screen == primaryScreen) {
+            label += " 主屏";
+        }
+        m_deskScreenCombo->addItem(label, connectorName);
+    }
+
+    int selectedIndex = m_deskScreenCombo->findData(previousScreen);
+    if (selectedIndex < 0 && primaryScreen) {
+        selectedIndex = m_deskScreenCombo->findData(primaryScreen->name());
+    }
+    if (selectedIndex >= 0) {
+        m_deskScreenCombo->setCurrentIndex(selectedIndex);
+    }
+    m_deskScreenCombo->setEnabled(m_deskScreenCombo->count() > 0);
+}
+
+void RoomDialog::setDesktopShareStatusText(const QString &text, const QString &toolTip)
+{
+    if (!m_deskStatusLabel || m_deskStatusLabel->text() == text) {
+        return;
+    }
+    m_deskStatusLabel->setText(text);
+    m_deskStatusLabel->setToolTip(toolTip);
 }
 
 void RoomDialog::slot_setBigImage(int userid, QImage &img)

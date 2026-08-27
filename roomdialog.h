@@ -12,7 +12,9 @@ class RoomDialog;
 class QComboBox;
 class QEvent;
 class QFrame;
+class QLabel;
 class QPushButton;
+class QScreen;
 class QTextBrowser;
 class QTextEdit;
 
@@ -30,6 +32,7 @@ signals:
     void SIG_deskOpen();
     void SIG_deskClose();
     void SIG_desktopShareSettingsChanged(int width, int height, int frameRate);
+    void SIG_desktopShareScreenChanged(const QString &screenName);
     void SIG_setFunnyPic(int picid);
     void SIG_chatMessageSend(const QString &message);
     void SIG_chatUserRequested(int userId);
@@ -49,9 +52,14 @@ public slots:
     void slot_clearBigImage(int userid);
     void slot_setCaptureState(bool active);
     void slot_setLatency(int latencyMs);
+    void slot_setDesktopSharePending(int frameRate, int bitRate);
+    void slot_setDesktopShareStatus(int width, int height, int frameRate, int bitRate,
+                                    const QString &encoderName);
+    void slot_clearDesktopShareStatus();
     void slot_appendChatMessage(int userId, const QString &name, const QString &message,
                                 bool ownMessage);
     void slot_clearChatInput();
+    QString desktopShareScreenName() const;
 private slots:
     void on_pb_close_clicked();
 
@@ -73,6 +81,9 @@ private slots:
 
 private:
     void emitDesktopShareSettings();
+    void emitDesktopShareScreen();
+    void refreshDesktopScreens();
+    void setDesktopShareStatusText(const QString &text, const QString &toolTip);
     void setChatPanelVisible(bool visible);
     void sendChatMessage();
     void updateChatButton();
@@ -82,8 +93,10 @@ protected:
 
     Ui::RoomDialog *ui;
     LatencyLabel *m_latencyLabel;
+    QLabel *m_deskStatusLabel = nullptr;
     QComboBox *m_deskResolutionCombo = nullptr;
     QComboBox *m_deskFrameRateCombo = nullptr;
+    QComboBox *m_deskScreenCombo = nullptr;
     QFrame *m_chatPanel = nullptr;
     QTextBrowser *m_chatHistory = nullptr;
     QTextEdit *m_chatInput = nullptr;

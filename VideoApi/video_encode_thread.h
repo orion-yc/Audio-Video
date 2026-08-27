@@ -12,7 +12,7 @@ public:
 
 signals:
     void SIG_videoEncoded(QByteArray encoded, int flags, int width, int height,
-                          quint64 generation);
+                          quint64 generation, QString encoderName);
     void SIG_encodeFinished();
 
 public slots:

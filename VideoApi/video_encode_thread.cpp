@@ -14,7 +14,8 @@ void VideoEncodeThread::slot_encodeFrame(QImage image, int frameRate, int bitRat
                          &encoded, &isKeyFrame, &encodedSize)) {
         const int flags = isKeyFrame ? H264_PAYLOAD_FLAG_KEYFRAME : 0;
         Q_EMIT SIG_videoEncoded(encoded, flags,
-                                 encodedSize.width(), encodedSize.height(), generation);
+                                 encodedSize.width(), encodedSize.height(), generation,
+                                 m_encoder.backendName());
     }
     Q_EMIT SIG_encodeFinished();
 }

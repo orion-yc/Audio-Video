@@ -6,6 +6,8 @@
 #include<QApplication>
 #include<QScreen>
 #include<QImage>
+#include<QMutex>
+#include<QString>
 #include <atomic>
 #include"video_common.h"
 #include"workthread.h"
@@ -39,9 +41,12 @@ public slots:
     void start();
     void pause();
     void setCaptureSettings(int maxWidth, int maxHeight, int frameRate);
+    void setCaptureScreenName(const QString &screenName);
     void slot_scheduleFrame();
     void slot_getScreenFrame();
 private:
+    QScreen *captureScreen() const;
+
     QTimer* m_timer;
     QSharedPointer<DeskReadThread> m_deskReadThread;
     std::atomic_bool m_capturing;
@@ -49,6 +54,8 @@ private:
     std::atomic_int m_maxWidth;
     std::atomic_int m_maxHeight;
     std::atomic_int m_frameRate;
+    mutable QMutex m_captureScreenMutex;
+    QString m_captureScreenName;
 };
 
 // 需要 输出 截屏(qt) -> 信号形式输出

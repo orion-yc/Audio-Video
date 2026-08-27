@@ -218,6 +218,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             m_roomDialog, &RoomDialog::slot_setCaptureState);
 
     m_deskRead  = new Desk_Read;
+    m_deskRead->setCaptureScreenName(m_roomDialog->desktopShareScreenName());
 
     connect(m_audioRead, SIGNAL(SIG_audioFrame(QByteArray&)),
             this, SLOT(slot_sendAudioFrame(QByteArray&)));
@@ -248,6 +249,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_deskClose()));
     connect(m_roomDialog, SIGNAL(SIG_desktopShareSettingsChanged(int,int,int)),
             this, SLOT(slot_setDesktopShareSettings(int,int,int)));
+    connect(m_roomDialog, &RoomDialog::SIG_desktopShareScreenChanged,
+            this, &CKernal::slot_setDesktopShareScreen);
 
     connect(m_roomDialog, SIGNAL(SIG_setFunnyPic(int)),
             this, SLOT(slot_setFunnyPic(int)));
@@ -1132,6 +1135,7 @@ void CKernal::slot_captureOpen()
     }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Camera;
+    m_roomDialog->slot_clearDesktopShareStatus();
     m_videoRead->start();
 }
 
@@ -1154,6 +1158,7 @@ void CKernal::slot_deskOpen()
     }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Desktop;
+    m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
     m_deskRead->start();
 }
 
@@ -1163,6 +1168,7 @@ void CKernal::slot_deskClose()
     if (m_activeVideoSource == VideoSource::Desktop) {
         stopLocalVideo();
     }
+    m_roomDialog->slot_clearDesktopShareStatus();
 }
 
 int CKernal::desktopShareBitRate(int width, int height, int frameRate) const
@@ -1194,6 +1200,19 @@ void CKernal::slot_setDesktopShareSettings(int width, int height, int frameRate)
     m_deskRead->setCaptureSettings(width, height, frameRate);
 
     if (changed && m_activeVideoSource == VideoSource::Desktop) {
+        m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
+        Q_EMIT SIG_resetVideoEncoder();
+    }
+}
+
+void CKernal::slot_setDesktopShareScreen(const QString &screenName)
+{
+    if (!m_deskRead || screenName.isEmpty()) {
+        return;
+    }
+    m_deskRead->setCaptureScreenName(screenName);
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
         Q_EMIT SIG_resetVideoEncoder();
     }
 }
@@ -1519,8 +1538,13 @@ void CKernal::slot_sendDesktopVideoFrame(QImage img)
 }
 
 void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
-                                 quint64 generation)
+                                 quint64 generation, QString encoderName)
 {
+    if (generation == m_videoStreamGeneration && m_activeVideoSource == VideoSource::Desktop
+            && width >= 2 && height >= 2) {
+        m_roomDialog->slot_setDesktopShareStatus(width, height, m_desktopFrameRate,
+                                                  m_desktopBitRate, encoderName);
+    }
     if (generation != m_videoStreamGeneration || m_roomid == 0 || encoded.isEmpty() ||
             width < 2 || height < 2) {
         return;

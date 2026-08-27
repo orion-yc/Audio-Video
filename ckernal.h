@@ -117,6 +117,7 @@ public slots:
     void slot_deskOpen();
     void slot_deskClose();
     void slot_setDesktopShareSettings(int width, int height, int frameRate);
+    void slot_setDesktopShareScreen(const QString &screenName);
     void slot_sendRoomChatMessage(const QString &message);
     void slot_showRoomMemberProfile(int userId);
 
@@ -128,7 +129,7 @@ public slots:
     void slot_sendCameraVideoFrame(QImage img);
     void slot_sendDesktopVideoFrame(QImage img);
     void slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
-                            quint64 generation);
+                            quint64 generation, QString encoderName);
     void slot_videoEncodeFinished();
     void slot_refleshUserImage(int id, QImage &img);
 

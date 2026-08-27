@@ -53,6 +53,31 @@ void Desk_Read::setCaptureSettings(int maxWidth, int maxHeight, int frameRate)
     }
 }
 
+void Desk_Read::setCaptureScreenName(const QString &screenName)
+{
+    QMutexLocker locker(&m_captureScreenMutex);
+    m_captureScreenName = screenName;
+}
+
+QScreen *Desk_Read::captureScreen() const
+{
+    QString screenName;
+    {
+        QMutexLocker locker(&m_captureScreenMutex);
+        screenName = m_captureScreenName;
+    }
+
+    if (!screenName.isEmpty()) {
+        const QList<QScreen *> screens = QGuiApplication::screens();
+        for (QScreen *screen : screens) {
+            if (screen && screen->name() == screenName) {
+                return screen;
+            }
+        }
+    }
+    return QGuiApplication::primaryScreen();
+}
+
 void Desk_Read::slot_scheduleFrame()
 {
     if (!m_capturing.load()) {
@@ -75,12 +100,10 @@ void Desk_Read::slot_getScreenFrame()
         m_frameQueued.store(false);
         return;
     }
-    // 获取桌面
-    // 1.获取主屏
-    QScreen *src = QApplication::primaryScreen();
-    // QRect deskRect = QApplication::desktop()->screenGeometry();
+    // Capture the selected physical screen. Falling back to the primary screen
+    // keeps sharing available if a selected monitor is disconnected mid-call.
+    QScreen *src = captureScreen();
 
-    // 2.获取主屏的图片，可以选择截取的大小
     if (!src) {
         m_frameQueued.store(false);
         return;

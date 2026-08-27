@@ -66,21 +66,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.13
+.\packaging\build-release.ps1 -Version 1.0.14
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist` 目录会生成：
 
-- `Audio-Video-Setup-1.0.13.exe`
-- `Audio-Video-Portable-1.0.13.zip`
+- `Audio-Video-Setup-1.0.14.exe`
+- `Audio-Video-Portable-1.0.14.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.0.13
+.\packaging\build-release-msvc.ps1 -Version 1.0.14
 ```
 
-该脚本会生成 `Audio-Video-MSVC-Setup-1.0.13.exe` 和 `Audio-Video-MSVC-Portable-1.0.13.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会生成 `Audio-Video-MSVC-Setup-1.0.14.exe` 和 `Audio-Video-MSVC-Portable-1.0.14.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
