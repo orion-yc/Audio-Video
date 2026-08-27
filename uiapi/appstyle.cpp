@@ -296,6 +296,46 @@ void applyAppStyle(QApplication &application)
 
         QToolButton#pb_chatClose:hover { background: #2A2E34; color: #FFFFFF; }
 
+        QDialog#UserProfileDialog { background: #111315; }
+
+        QLabel#lb_profileAvatar {
+            background: #090A0C;
+            border: 2px solid #C9363D;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_profileName {
+            color: #FFFFFF;
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        QLabel#lb_profileMemberType { color: #FF8B90; font-size: 12px; }
+
+        QFrame#wdg_profileDetails {
+            background: #0D0F12;
+            border: 1px solid #292D33;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_profileCaption { color: #777F8B; font-size: 12px; }
+        QLabel#lb_profileValue { color: #F4F4F5; font-weight: 600; }
+        QLabel#lb_profileFeeling { color: #D7DBE0; }
+
+        QPushButton#pb_profileClose {
+            background: #24282E;
+            border: 1px solid #3C424B;
+            color: #F4F4F5;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
+        QPushButton#pb_profileClose:hover {
+            background: #2A171A;
+            border-color: #E5484D;
+            color: #FFFFFF;
+        }
+
         UserShow {
             background: #090A0C;
             border: 1px solid #2D1518;

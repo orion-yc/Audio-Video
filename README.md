@@ -66,21 +66,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.0.11
+.\packaging\build-release.ps1 -Version 1.0.12
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist`:
 
-- `Audio-Video-Setup-1.0.11.exe`
-- `Audio-Video-Portable-1.0.11.zip`
+- `Audio-Video-Setup-1.0.12.exe`
+- `Audio-Video-Portable-1.0.12.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.0.11
+.\packaging\build-release-msvc.ps1 -Version 1.0.12
 ```
 
-This produces `Audio-Video-MSVC-Setup-1.0.11.exe` and `Audio-Video-MSVC-Portable-1.0.11.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `Audio-Video-MSVC-Setup-1.0.12.exe` and `Audio-Video-MSVC-Portable-1.0.12.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 

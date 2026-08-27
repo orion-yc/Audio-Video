@@ -1,4 +1,4 @@
-Audio-Video 1.0.11
+Audio-Video 1.0.12
 =================
 
 System requirements
@@ -10,12 +10,12 @@ System requirements
 
 Installation
 ------------
-Run Audio-Video-Setup-1.0.11.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.0.12.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-Portable-1.0.11.zip, then run Audio-Video.exe.
+Extract Audio-Video-Portable-1.0.12.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration

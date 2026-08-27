@@ -25,6 +25,7 @@
 #include <atomic>
 #include <memory>
 class CKernal;
+class UserProfileDialog;
 
 typedef void (CKernal::*PFUN)(uint socket,char* buf,int nlen);
 
@@ -117,6 +118,7 @@ public slots:
     void slot_deskClose();
     void slot_setDesktopShareSettings(int width, int height, int frameRate);
     void slot_sendRoomChatMessage(const QString &message);
+    void slot_showRoomMemberProfile(int userId);
 
     void slot_sendAudioFrame(QByteArray &ba );
     void slot_refleshVideoImage(QImage img);
@@ -207,7 +209,9 @@ private:
     QString                         m_name;
     int                             m_userIconId;
     QImage                          m_userAvatar;
+    QString                         m_userFeeling;
     SetUserDialog*                  m_setUserDialog;
+    UserProfileDialog*              m_userProfileDialog;
     // 每个用户视频的显示
     std::map<int, UserShow*>        m_mapIDToUserShow;
 

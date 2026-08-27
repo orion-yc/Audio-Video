@@ -14,6 +14,7 @@
 #include <QTextCursor>
 #include <QTime>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 
 RoomDialog::RoomDialog(QWidget *parent) :
@@ -103,6 +104,16 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_chatHistory->setReadOnly(true);
     m_chatHistory->setPlaceholderText("还没有消息");
     chatLayout->addWidget(m_chatHistory, 1);
+    connect(m_chatHistory, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) {
+        if (url.scheme() != "profile") {
+            return;
+        }
+        bool validUserId = false;
+        const int userId = url.path().mid(1).toInt(&validUserId);
+        if (validUserId && userId > 0) {
+            Q_EMIT SIG_chatUserRequested(userId);
+        }
+    });
 
     m_chatInput = new QTextEdit(m_chatPanel);
     m_chatInput->setObjectName("te_chatInput");
@@ -217,23 +228,27 @@ void RoomDialog::slot_setRoomClear()
 void RoomDialog::slot_appendChatMessage(int userId, const QString &name, const QString &message,
                                         bool ownMessage)
 {
-    Q_UNUSED(userId);
     if (!m_chatHistory || message.trimmed().isEmpty()) {
         return;
     }
 
     const QString escapedName = (name.trimmed().isEmpty() ? QString("未设置昵称") : name.trimmed())
             .toHtmlEscaped();
+    const QString profileLink = QStringLiteral("<a href=\"profile:///%1\" "
+                                               "style=\"color:%2;font-weight:600;"
+                                               "text-decoration:none;\">%3</a>")
+            .arg(userId)
+            .arg(ownMessage ? "#FF7A80" : "#E6E8EB")
+            .arg(escapedName);
     const QString escapedMessage = message.toHtmlEscaped().replace("\n", "<br/>");
     const QString timestamp = QTime::currentTime().toString("HH:mm");
-    const QString senderColor = ownMessage ? "#FF7A80" : "#E6E8EB";
     const QString messageColor = ownMessage ? "#FFE7E8" : "#D7DBE0";
     m_chatHistory->append(QStringLiteral(
         "<div style=\"margin:2px 2px 12px 2px;\">"
-        "<span style=\"color:%1;font-weight:600;\">%2</span>"
-        "<span style=\"color:#777F8B;margin-left:8px;\">%3</span><br/>"
-        "<span style=\"color:%4;\">%5</span></div>")
-        .arg(senderColor, escapedName, timestamp, messageColor, escapedMessage));
+        "%1"
+        "<span style=\"color:#777F8B;margin-left:8px;\">%2</span><br/>"
+        "<span style=\"color:%3;\">%4</span></div>")
+        .arg(profileLink, timestamp, messageColor, escapedMessage));
     m_chatHistory->moveCursor(QTextCursor::End);
     m_chatHistory->verticalScrollBar()->setValue(m_chatHistory->verticalScrollBar()->maximum());
 

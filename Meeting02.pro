@@ -4,7 +4,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++17
 
-VERSION = 1.0.11.0
+VERSION = 1.0.12.0
 TARGET = Audio-Video
 QMAKE_TARGET_PRODUCT = Audio-Video
 QMAKE_TARGET_DESCRIPTION = Audio-Video conferencing client
@@ -21,6 +21,7 @@ SOURCES += \
     demodialog.cpp \
     roomdialog.cpp \
     setuserdialog.cpp \
+    userprofiledialog.cpp \
     usershow.cpp \
     workthread.cpp
 
@@ -30,6 +31,7 @@ HEADERS += \
     logindialog.h \
     roomdialog.h \
     setuserdialog.h \
+    userprofiledialog.h \
     usershow.h \
     workthread.h
 

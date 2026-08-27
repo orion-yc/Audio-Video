@@ -1,4 +1,5 @@
 #include "ckernal.h"
+#include "userprofiledialog.h"
 #include <QDebug>
 #include <QCryptographicHash>
 #include <QMessageBox>
@@ -122,7 +123,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_controlSocket(new QTcpSocket(this))
   ,m_controlReconnectTimer(new QTimer(this))
   ,m_userid(0), m_roomid(0), m_loggedIn(false), m_shuttingDown(false)
-  ,m_userIconId(0), m_sendVideoThread(new SendThread)
+  ,m_userIconId(0), m_userProfileDialog(nullptr), m_sendVideoThread(new SendThread)
   ,m_videoEncodeThread(new VideoEncodeThread)
   ,m_videoEncodeBusy(false)
   ,m_videoStreamGeneration(0)
@@ -199,6 +200,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     m_loginDialog->show();
 
     m_roomDialog = new RoomDialog;
+    m_userProfileDialog = new UserProfileDialog(m_roomDialog);
     connect(m_roomDialog, SIGNAL(SIG_quitRoom())
             , this, SLOT(slot_quitRoom()));
     m_setUserDialog = new SetUserDialog;
@@ -251,6 +253,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_setFunnyPic(int)));
     connect(m_roomDialog, &RoomDialog::SIG_chatMessageSend,
             this, &CKernal::slot_sendRoomChatMessage);
+    connect(m_roomDialog, &RoomDialog::SIG_chatUserRequested,
+            this, &CKernal::slot_showRoomMemberProfile);
 
     connect(this, &CKernal::SIG_sendVideoFrame,
             m_sendVideoThread.get(), &SendThread::slot_threadSendData);
@@ -739,6 +743,7 @@ void CKernal::slot_dealRoomChatMessage(uint socket, char *buf, int nlen)
     if (senderName.isEmpty()) {
         senderName = QString("用户%1").arg(message->m_UserID);
     }
+    ensureRemoteParticipant(message->m_UserID, senderName);
     m_roomDialog->slot_appendChatMessage(message->m_UserID, senderName, text, false);
 }
 
@@ -754,6 +759,7 @@ void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
     m_name = QString::fromStdString(rq->m_szUser);
     m_userIconId = qBound(0, rq->m_iconid, 35);
     const QString feeling = QString::fromStdString(rq->m_userFeeling);
+    m_userFeeling = feeling;
 
     m_demoDialog->slot_setInfo(m_name, m_userIconId);
     m_setUserDialog->slot_setInfo(m_userIconId, m_name, feeling);
@@ -913,6 +919,9 @@ void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
         user->second->slot_setAvatarImage(avatar);
     }
     m_roomDialog->slot_setBigAvatar(rs->m_TargetUserID, avatar);
+    if (m_userProfileDialog && m_userProfileDialog->userId() == rs->m_TargetUserID) {
+        m_userProfileDialog->slot_setAvatar(avatar);
+    }
 }
 
 void CKernal::slot_dealLeaveRoomRq(uint socket, char *buf, int nlen)
@@ -1213,6 +1222,38 @@ void CKernal::slot_sendRoomChatMessage(const QString &message)
     }
     m_roomDialog->slot_appendChatMessage(m_userid, m_name, normalizedMessage, true);
     m_roomDialog->slot_clearChatInput();
+}
+
+void CKernal::slot_showRoomMemberProfile(int userId)
+{
+    if (!m_userProfileDialog || userId <= 0 || m_roomid == 0) {
+        return;
+    }
+
+    const bool currentUser = userId == m_userid;
+    QString name;
+    QString feeling;
+    QImage avatar;
+
+    if (currentUser) {
+        name = m_name;
+        feeling = m_userFeeling;
+        avatar = m_userAvatar.isNull() ? builtInAvatar(m_userIconId) : m_userAvatar;
+    } else {
+        const auto participant = m_mapIDToUserShow.find(userId);
+        if (participant == m_mapIDToUserShow.end()) {
+            return;
+        }
+        name = participant->second->m_name;
+        avatar = participant->second->m_avatarImg.isNull()
+                ? participant->second->m_defaultImg : participant->second->m_avatarImg;
+        requestAvatar(userId);
+    }
+
+    m_userProfileDialog->setProfile(userId, name, avatar, feeling, currentUser);
+    m_userProfileDialog->show();
+    m_userProfileDialog->raise();
+    m_userProfileDialog->activateWindow();
 }
 
 void CKernal::slot_cameraStateChanged(bool active)

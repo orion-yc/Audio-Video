@@ -32,6 +32,7 @@ signals:
     void SIG_desktopShareSettingsChanged(int width, int height, int frameRate);
     void SIG_setFunnyPic(int picid);
     void SIG_chatMessageSend(const QString &message);
+    void SIG_chatUserRequested(int userId);
 public:
     explicit RoomDialog(QWidget *parent = nullptr);
     ~RoomDialog();
