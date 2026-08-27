@@ -100,6 +100,9 @@ RoomDialog::RoomDialog(QWidget *parent) :
 
     m_chatHistory = new QTextBrowser(m_chatPanel);
     m_chatHistory->setObjectName("tb_chatHistory");
+    // User names are in-document links. Handle them through anchorClicked only;
+    // otherwise QTextBrowser navigates to the profile URL and replaces the chat history.
+    m_chatHistory->setOpenLinks(false);
     m_chatHistory->setOpenExternalLinks(false);
     m_chatHistory->setReadOnly(true);
     m_chatHistory->setPlaceholderText("还没有消息");

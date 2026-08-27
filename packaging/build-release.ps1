@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.12',
+    [string]$Version = '1.0.13',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\mingw_64',
     [string]$MinGwRoot = 'E:\App\Qt\Tools\mingw1310_64',
     [string]$OpenCvRoot = 'E:\perject\OpenCV-4.13.0-MinGW64\install',
