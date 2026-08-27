@@ -94,6 +94,7 @@ protected:
     Ui::RoomDialog *ui;
     LatencyLabel *m_latencyLabel;
     QLabel *m_deskStatusLabel = nullptr;
+    QComboBox *m_viewScaleCombo = nullptr;
     QComboBox *m_deskResolutionCombo = nullptr;
     QComboBox *m_deskFrameRateCombo = nullptr;
     QComboBox *m_deskScreenCombo = nullptr;

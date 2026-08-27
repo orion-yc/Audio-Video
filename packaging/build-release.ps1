@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.14',
+    [string]$Version = '1.0.15',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\mingw_64',
     [string]$MinGwRoot = 'E:\App\Qt\Tools\mingw1310_64',
     [string]$OpenCvRoot = 'E:\perject\OpenCV-4.13.0-MinGW64\install',
@@ -13,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $buildDir = Join-Path $projectRoot 'build-qt6'
 $releaseDir = Join-Path $buildDir 'release'
-$distDir = Join-Path $projectRoot 'dist'
+$distRoot = Join-Path $projectRoot 'dist'
+$distDir = Join-Path $distRoot 'MinGW'
 $stageDir = Join-Path $distDir "Audio-Video-$Version"
 $portableZip = Join-Path $distDir "Audio-Video-Portable-$Version.zip"
 $ffmpegDefaultRoot = Join-Path $projectRoot 'third_party\ffmpeg-master-latest-win64-lgpl-shared'
@@ -165,7 +166,8 @@ if (Test-Path -LiteralPath $portableZip) {
 }
 Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $portableZip -CompressionLevel Optimal
 
-& $iscc "/DAppVersion=$Version" (Join-Path $PSScriptRoot 'Meeting.iss')
+& $iscc "/DAppVersion=$Version" '/DAppDistribution=MinGW' `
+    (Join-Path $PSScriptRoot 'Meeting.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
 
 $installer = Join-Path $distDir "Audio-Video-Setup-$Version.exe"

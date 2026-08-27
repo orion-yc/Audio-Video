@@ -39,6 +39,7 @@ H264Encoder::H264Encoder()
     , m_scaler(nullptr)
     , m_frameRate(0)
     , m_bitRate(0)
+    , m_desktopContent(false)
     , m_nextPts(0)
 {
 }
@@ -71,12 +72,13 @@ void H264Encoder::reset()
     m_size = QSize();
     m_frameRate = 0;
     m_bitRate = 0;
+    m_desktopContent = false;
     m_nextPts = 0;
     m_backendName.clear();
 }
 
 bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
-                              int frameRate, int bitRate)
+                              int frameRate, int bitRate, bool desktopContent)
 {
     const AVCodec *codec = avcodec_find_encoder_by_name(encoderName);
     if (!codec) {
@@ -98,8 +100,9 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
     context->time_base = AVRational{1, frameRate};
     context->framerate = AVRational{frameRate, 1};
     context->bit_rate = bitRate;
-    context->rc_max_rate = bitRate;
-    context->rc_buffer_size = bitRate;
+    context->rc_max_rate = desktopContent
+            ? static_cast<int64_t>(bitRate) * 3 / 2 : bitRate;
+    context->rc_buffer_size = context->rc_max_rate;
     context->gop_size = frameRate * 2;
     context->max_b_frames = 0;
     context->flags |= AV_CODEC_FLAG_LOW_DELAY;
@@ -110,9 +113,12 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
         // while retaining the low-latency path used by desktop sharing.
         av_opt_set(context->priv_data, "preset", "p5", 0);
         av_opt_set(context->priv_data, "tune", "ll", 0);
-        av_opt_set(context->priv_data, "rc", "cbr", 0);
+        av_opt_set(context->priv_data, "rc", desktopContent ? "vbr" : "cbr", 0);
         av_opt_set(context->priv_data, "zerolatency", "1", 0);
         av_opt_set(context->priv_data, "forced-idr", "1", 0);
+        if (desktopContent) {
+            av_opt_set(context->priv_data, "cq", "18", 0);
+        }
     } else if (isOpenH264(encoderName)) {
         av_opt_set(context->priv_data, "rc_mode", "bitrate", 0);
         av_opt_set(context->priv_data, "allow_skip_frames", "1", 0);
@@ -157,26 +163,30 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
     m_size = QSize(context->width, context->height);
     m_frameRate = frameRate;
     m_bitRate = bitRate;
+    m_desktopContent = desktopContent;
     m_backendName = QString::fromLatin1(encoderName);
     qInfo() << "H.264 encoder selected:" << m_backendName
             << m_size << frameRate << "fps" << bitRate / 1000000 << "Mbps";
     return true;
 }
 
-bool H264Encoder::openForImage(const QImage &image, int frameRate, int bitRate)
+bool H264Encoder::openForImage(const QImage &image, int frameRate, int bitRate,
+                               bool desktopContent)
 {
     // Keep the primary hardware path first. libopenh264 is the software fallback.
-    return openEncoder("h264_nvenc", image, frameRate, bitRate)
-            || openSoftwareFallback(image, frameRate, bitRate);
+    return openEncoder("h264_nvenc", image, frameRate, bitRate, desktopContent)
+            || openSoftwareFallback(image, frameRate, bitRate, desktopContent);
 }
 
-bool H264Encoder::openSoftwareFallback(const QImage &image, int frameRate, int bitRate)
+bool H264Encoder::openSoftwareFallback(const QImage &image, int frameRate, int bitRate,
+                                       bool desktopContent)
 {
-    return openEncoder("libopenh264", image, frameRate, bitRate)
-            || openEncoder("h264_mf", image, frameRate, bitRate);
+    return openEncoder("libopenh264", image, frameRate, bitRate, desktopContent)
+            || openEncoder("h264_mf", image, frameRate, bitRate, desktopContent);
 }
 
 bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,
+                         bool desktopContent,
                          QByteArray *encoded, bool *isKeyFrame, QSize *encodedSize)
 {
     if (!encoded || !isKeyFrame || !encodedSize || image.isNull()) {
@@ -187,9 +197,10 @@ bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,
     if (requiredSize.width() < 2 || requiredSize.height() < 2) {
         return false;
     }
-    if (!m_context || requiredSize != m_size || frameRate != m_frameRate || bitRate != m_bitRate) {
+    if (!m_context || requiredSize != m_size || frameRate != m_frameRate
+            || bitRate != m_bitRate || desktopContent != m_desktopContent) {
         reset();
-        if (!openForImage(image, frameRate, bitRate)) {
+        if (!openForImage(image, frameRate, bitRate, desktopContent)) {
             qWarning() << "No H.264 encoder is available.";
             return false;
         }
@@ -221,54 +232,81 @@ bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,
               m_frame->data, m_frame->linesize);
     m_frame->pts = m_nextPts++;
 
-    const int sendResult = avcodec_send_frame(m_context, m_frame);
+    encoded->clear();
+    *isKeyFrame = false;
+    const auto receivePackets = [this, encoded, isKeyFrame]() -> int {
+        while (true) {
+            const int result = avcodec_receive_packet(m_context, m_packet);
+            if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
+                return 0;
+            }
+            if (result < 0) {
+                return result;
+            }
+            encoded->append(reinterpret_cast<const char *>(m_packet->data),
+                            m_packet->size);
+            *isKeyFrame = *isKeyFrame || (m_packet->flags & AV_PKT_FLAG_KEY);
+            av_packet_unref(m_packet);
+        }
+    };
+
+    int sendResult = avcodec_send_frame(m_context, m_frame);
+    if (sendResult == AVERROR(EAGAIN)) {
+        // The encoder still owns output from an earlier input frame. Drain it,
+        // then retry this frame without changing encoder backends.
+        const int drainResult = receivePackets();
+        if (drainResult < 0) {
+            qWarning().noquote() << "Unable to drain H.264 packet:"
+                                 << ffmpegError(drainResult);
+            if (isNvenc(m_backendName.toLatin1().constData())) {
+                qInfo() << "NVENC packet draining failed; switching to software H.264.";
+                reset();
+                if (openSoftwareFallback(image, frameRate, bitRate, desktopContent)) {
+                    return encode(image, frameRate, bitRate, desktopContent,
+                                  encoded, isKeyFrame, encodedSize);
+                }
+            }
+            return false;
+        }
+        sendResult = avcodec_send_frame(m_context, m_frame);
+        if (sendResult == AVERROR(EAGAIN)) {
+            qWarning() << "H.264 encoder remained back-pressured after draining output.";
+            *encodedSize = m_size;
+            return !encoded->isEmpty();
+        }
+    }
     if (sendResult < 0) {
         qWarning().noquote() << "Unable to encode H.264 frame:" << ffmpegError(sendResult);
         if (isNvenc(m_backendName.toLatin1().constData())) {
             qInfo() << "NVENC frame encoding failed; switching to software H.264.";
             reset();
-            if (openSoftwareFallback(image, frameRate, bitRate)) {
-                return encode(image, frameRate, bitRate, encoded, isKeyFrame, encodedSize);
+            if (openSoftwareFallback(image, frameRate, bitRate, desktopContent)) {
+                return encode(image, frameRate, bitRate, desktopContent,
+                              encoded, isKeyFrame, encodedSize);
             }
         }
         return false;
     }
 
-    encoded->clear();
-    *isKeyFrame = false;
-    while (true) {
-        const int receiveResult = avcodec_receive_packet(m_context, m_packet);
-        if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
-            break;
-        }
-        if (receiveResult < 0) {
-            qWarning().noquote() << "Unable to read H.264 packet:" << ffmpegError(receiveResult);
-            if (isNvenc(m_backendName.toLatin1().constData())) {
-                qInfo() << "NVENC packet encoding failed; switching to software H.264.";
-                reset();
-                if (openSoftwareFallback(image, frameRate, bitRate)) {
-                    return encode(image, frameRate, bitRate, encoded, isKeyFrame, encodedSize);
-                }
+    const int receiveResult = receivePackets();
+    if (receiveResult < 0) {
+        qWarning().noquote() << "Unable to read H.264 packet:" << ffmpegError(receiveResult);
+        if (isNvenc(m_backendName.toLatin1().constData())) {
+            qInfo() << "NVENC packet encoding failed; switching to software H.264.";
+            reset();
+            if (openSoftwareFallback(image, frameRate, bitRate, desktopContent)) {
+                return encode(image, frameRate, bitRate, desktopContent,
+                              encoded, isKeyFrame, encodedSize);
             }
-            return false;
         }
-        encoded->append(reinterpret_cast<const char *>(m_packet->data), m_packet->size);
-        *isKeyFrame = *isKeyFrame || (m_packet->flags & AV_PKT_FLAG_KEY);
-        av_packet_unref(m_packet);
+        return false;
     }
 
     *encodedSize = m_size;
-    if (!encoded->isEmpty()) {
-        return true;
-    }
-    if (isNvenc(m_backendName.toLatin1().constData())) {
-        qInfo() << "NVENC produced no packet; switching to software H.264.";
-        reset();
-        if (openSoftwareFallback(image, frameRate, bitRate)) {
-            return encode(image, frameRate, bitRate, encoded, isKeyFrame, encodedSize);
-        }
-    }
-    return false;
+    // A hardware encoder may buffer initial frames and return EAGAIN without
+    // producing a packet. Keep the active encoder and submit the next frame;
+    // an empty packet is not an encoder failure.
+    return !encoded->isEmpty();
 }
 
 H264Decoder::H264Decoder()

@@ -1,15 +1,20 @@
 #ifndef AppVersion
-#define AppVersion "1.0.14"
+#define AppVersion "1.0.15"
 #endif
 
 #ifndef AppVariant
   #define AppVariant ""
 #endif
 
+#ifndef AppDistribution
+  #define AppDistribution "MinGW"
+#endif
+
 #define AppName "Audio-Video"
 #define ArtifactName "Audio-Video" + AppVariant
 #define AppExeName "Audio-Video.exe"
-#define SourceDir "..\dist\" + ArtifactName + "-" + AppVersion
+#define DistributionDir "..\dist\" + AppDistribution
+#define SourceDir DistributionDir + "\" + ArtifactName + "-" + AppVersion
 
 [Setup]
 AppId={{A14BFCA1-CF8B-4FA0-9B9A-DA89DE804DB4}
@@ -23,7 +28,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\dist
+OutputDir={#DistributionDir}
 OutputBaseFilename={#ArtifactName}-Setup-{#AppVersion}
 SetupIconFile=..\images\message.ico
 UninstallDisplayIcon={app}\{#AppExeName}

@@ -54,6 +54,23 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskStatusLabel->setToolTip("桌面共享的实际编码状态");
     ui->horizontalLayout->insertWidget(1, m_deskStatusLabel);
 
+    auto *viewScaleLabel = new QLabel("查看", this);
+    viewScaleLabel->setMinimumHeight(28);
+    m_viewScaleCombo = new QComboBox(this);
+    m_viewScaleCombo->setMinimumHeight(28);
+    m_viewScaleCombo->setFixedWidth(96);
+    m_viewScaleCombo->setToolTip("调整大画面的查看倍率；放大后可按住画面拖动");
+    m_viewScaleCombo->addItem("适应窗口", 0.0);
+    m_viewScaleCombo->addItem("100%", 1.0);
+    m_viewScaleCombo->addItem("125%", 1.25);
+    m_viewScaleCombo->addItem("150%", 1.5);
+    ui->horizontalLayout->insertWidget(2, viewScaleLabel);
+    ui->horizontalLayout->insertWidget(3, m_viewScaleCombo);
+    connect(m_viewScaleCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+        ui->wdg_bigShow->slot_setViewScale(m_viewScaleCombo->currentData().toDouble());
+    });
+
     auto *qualityLabel = new QLabel("画质", this);
     qualityLabel->setMinimumHeight(28);
     m_deskResolutionCombo = new QComboBox(this);

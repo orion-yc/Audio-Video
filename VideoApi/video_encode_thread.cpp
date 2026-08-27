@@ -5,12 +5,12 @@ VideoEncodeThread::VideoEncodeThread()
 }
 
 void VideoEncodeThread::slot_encodeFrame(QImage image, int frameRate, int bitRate,
-                                         quint64 generation)
+                                         bool desktopContent, quint64 generation)
 {
     QByteArray encoded;
     bool isKeyFrame = false;
     QSize encodedSize;
-    if (m_encoder.encode(image, frameRate, bitRate,
+    if (m_encoder.encode(image, frameRate, bitRate, desktopContent,
                          &encoded, &isKeyFrame, &encodedSize)) {
         const int flags = isKeyFrame ? H264_PAYLOAD_FLAG_KEYFRAME : 0;
         Q_EMIT SIG_videoEncoded(encoded, flags,

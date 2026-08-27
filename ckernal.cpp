@@ -1509,7 +1509,8 @@ void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation)
     Q_EMIT SIG_sendVideoFrame(0, buf, sizeof(int)*7 + len, generation);
 }
 
-void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate)
+void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
+                              bool desktopContent)
 {
     if (m_roomid == 0 || image.isNull()) {
         return;
@@ -1519,21 +1520,21 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate)
     if (!m_videoEncodeBusy.compare_exchange_strong(expected, true)) {
         return;
     }
-    Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate,
+    Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate, desktopContent,
                                  m_videoStreamGeneration);
 }
 
 void CKernal::slot_sendCameraVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Camera) {
-        queueVideoFrame(img, CAMERA_FRAME_RATE, CAMERA_VIDEO_BITRATE);
+        queueVideoFrame(img, CAMERA_FRAME_RATE, CAMERA_VIDEO_BITRATE, false);
     }
 }
 
 void CKernal::slot_sendDesktopVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Desktop) {
-        queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate);
+        queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate, true);
     }
 }
 

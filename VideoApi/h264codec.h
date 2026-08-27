@@ -36,16 +36,18 @@ public:
     H264Encoder();
     ~H264Encoder();
 
-    bool encode(const QImage &image, int frameRate, int bitRate,
+    bool encode(const QImage &image, int frameRate, int bitRate, bool desktopContent,
                 QByteArray *encoded, bool *isKeyFrame, QSize *encodedSize);
     void reset();
     QString backendName() const;
 
 private:
-    bool openForImage(const QImage &image, int frameRate, int bitRate);
-    bool openSoftwareFallback(const QImage &image, int frameRate, int bitRate);
+    bool openForImage(const QImage &image, int frameRate, int bitRate,
+                      bool desktopContent);
+    bool openSoftwareFallback(const QImage &image, int frameRate, int bitRate,
+                              bool desktopContent);
     bool openEncoder(const char *encoderName, const QImage &image,
-                     int frameRate, int bitRate);
+                     int frameRate, int bitRate, bool desktopContent);
 
     AVCodecContext *m_context;
     AVFrame *m_frame;
@@ -54,6 +56,7 @@ private:
     QSize m_size;
     int m_frameRate;
     int m_bitRate;
+    bool m_desktopContent;
     qint64 m_nextPts;
     QString m_backendName;
 };

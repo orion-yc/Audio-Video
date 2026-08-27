@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.14',
+    [string]$Version = '1.0.15',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
     [string]$VcpkgRoot = '',
@@ -19,7 +19,8 @@ if ([string]::IsNullOrWhiteSpace($FFmpegRoot)) {
 
 $buildDir = Join-Path $projectRoot 'build-msvc'
 $releaseDir = Join-Path $buildDir 'release'
-$distDir = Join-Path $projectRoot 'dist'
+$distRoot = Join-Path $projectRoot 'dist'
+$distDir = Join-Path $distRoot 'MSVC'
 $artifactName = 'Audio-Video-MSVC'
 $stageDir = Join-Path $distDir "$artifactName-$Version"
 $portableZip = Join-Path $distDir "$artifactName-Portable-$Version.zip"
@@ -170,7 +171,8 @@ Assert-WithinProject $portableZip
 if (Test-Path -LiteralPath $portableZip) { Remove-Item -LiteralPath $portableZip -Force }
 Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $portableZip -CompressionLevel Optimal
 
-& $iscc "/DAppVersion=$Version" '/DAppVariant=-MSVC' (Join-Path $PSScriptRoot 'Meeting.iss')
+& $iscc "/DAppVersion=$Version" '/DAppVariant=-MSVC' '/DAppDistribution=MSVC' `
+    (Join-Path $PSScriptRoot 'Meeting.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
 
 $installer = Join-Path $distDir "$artifactName-Setup-$Version.exe"

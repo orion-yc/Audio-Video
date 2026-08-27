@@ -55,7 +55,7 @@ private:
 signals:
     void SIG_sendVideoFrame(uint socket, char* buf, int nlen, quint64 generation);
     void SIG_encodeVideoFrame(QImage image, int frameRate, int bitRate,
-                              quint64 generation);
+                              bool desktopContent, quint64 generation);
     void SIG_resetVideoEncoder();
 public:
     static CKernal* getInstance()
@@ -268,7 +268,8 @@ private:
     int                             m_pendingRoomId;
 
     void updateLatencyDisplay(int latencyMs);
-    void queueVideoFrame(const QImage &image, int frameRate, int bitRate);
+    void queueVideoFrame(const QImage &image, int frameRate, int bitRate,
+                         bool desktopContent);
 };
 
 //  当前视频和音频同时传输时，音频会卡顿，视频会有较大延迟
