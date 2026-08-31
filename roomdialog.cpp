@@ -2,6 +2,7 @@
 #include "ui_roomdialog.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QEvent>
 #include <QFrame>
 #include <QGuiApplication>
@@ -19,6 +20,8 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include "system_audio_read.h"
 
 RoomDialog::RoomDialog(QWidget *parent) :
     CustomMoveDialog(parent),
@@ -102,6 +105,18 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskScreenCombo->setToolTip("选择要共享的物理显示器");
     refreshDesktopScreens();
 
+    m_systemAudioCheck = new QCheckBox("系统声音", this);
+    m_systemAudioCheck->setMinimumHeight(28);
+    m_systemAudioCheck->setToolTip("把选定播放设备的系统声音与麦克风一起发送；建议使用耳机避免回声");
+    m_systemAudioCombo = new QComboBox(this);
+    m_systemAudioCombo->setMinimumHeight(28);
+    m_systemAudioCombo->setMinimumWidth(140);
+    m_systemAudioCombo->setMaximumWidth(190);
+    m_systemAudioCombo->setToolTip("选择要采集的播放设备；默认会跟随 Windows 默认输出");
+    refreshSystemAudioDevices();
+    m_systemAudioCombo->installEventFilter(this);
+    setSystemAudioControlsEnabled(false);
+
     int desktopControlIndex = ui->horizontalLayout_2->indexOf(ui->cb_desk) + 1;
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, qualityLabel);
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, m_deskResolutionCombo);
@@ -109,6 +124,19 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, m_deskFrameRateCombo);
     ui->horizontalLayout_2->insertWidget(desktopControlIndex++, screenLabel);
     ui->horizontalLayout_2->insertWidget(desktopControlIndex, m_deskScreenCombo);
+    const int audioControlIndex = ui->horizontalLayout_2->indexOf(ui->cb_audio) + 1;
+    ui->horizontalLayout_2->insertWidget(audioControlIndex, m_systemAudioCheck);
+    ui->horizontalLayout_2->insertWidget(audioControlIndex + 1, m_systemAudioCombo);
+    connect(m_systemAudioCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            slot_setSystemAudioError(QString());
+        }
+        Q_EMIT SIG_systemAudioStateChanged(checked);
+    });
+    connect(m_systemAudioCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](int) {
+        Q_EMIT SIG_systemAudioDeviceChanged(m_systemAudioCombo->currentData().toString());
+    });
     connect(m_deskResolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int) { emitDesktopShareSettings(); });
     connect(m_deskFrameRateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
@@ -292,6 +320,7 @@ void RoomDialog::slot_setRoomClear()
 {
     // 设置ui
     ui->cb_audio->setChecked(false);
+    setSystemAudioControlsEnabled(false);
     ui->cb_capture->setChecked(false);
     ui->cb_desk->setChecked(false);
     // 发信号
@@ -387,6 +416,11 @@ void RoomDialog::updateChatButton()
 
 bool RoomDialog::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_systemAudioCombo &&
+            (event->type() == QEvent::Show || event->type() == QEvent::MouseButtonPress ||
+             event->type() == QEvent::KeyPress)) {
+        refreshSystemAudioDevices();
+    }
     if (watched == m_chatInput && event->type() == QEvent::KeyPress) {
         const auto *keyEvent = static_cast<QKeyEvent *>(event);
         if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) &&
@@ -396,6 +430,43 @@ bool RoomDialog::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return CustomMoveDialog::eventFilter(watched, event);
+}
+
+void RoomDialog::refreshSystemAudioDevices()
+{
+    if (!m_systemAudioCombo) {
+        return;
+    }
+
+    const QString selectedId = m_systemAudioCombo->currentData().toString();
+    const QList<SystemAudioDevice> outputDevices = SystemAudio_Read::availableOutputDevices();
+    QString refreshedId;
+    {
+        const QSignalBlocker blocker(m_systemAudioCombo);
+        m_systemAudioCombo->clear();
+        m_systemAudioCombo->addItem("跟随系统默认设备", QString());
+        int selectedIndex = 0;
+        for (const SystemAudioDevice &device : outputDevices) {
+            QString label = device.name;
+            if (device.isDefault) {
+                label += " (默认)";
+            }
+            m_systemAudioCombo->addItem(label, device.id);
+            if (!selectedId.isEmpty() && selectedId == device.id) {
+                selectedIndex = m_systemAudioCombo->count() - 1;
+            }
+        }
+        m_systemAudioCombo->setCurrentIndex(selectedIndex);
+        refreshedId = m_systemAudioCombo->currentData().toString();
+    }
+    if (refreshedId != selectedId) {
+        Q_EMIT SIG_systemAudioDeviceChanged(refreshedId);
+    }
+    if (outputDevices.isEmpty()) {
+        m_systemAudioCombo->setToolTip("未找到活动播放设备，将在开启时尝试使用系统默认输出");
+    } else {
+        m_systemAudioCombo->setToolTip("选择要采集的播放设备；默认会跟随 Windows 默认输出");
+    }
 }
 
 void RoomDialog::emitDesktopShareSettings()
@@ -522,6 +593,17 @@ void RoomDialog::slot_setCaptureState(bool active)
     }
 }
 
+void RoomDialog::slot_setSystemAudioError(const QString &message)
+{
+    if (!m_systemAudioCheck) {
+        return;
+    }
+    const QString detail = message.trimmed().isEmpty()
+            ? QString("把选定播放设备的系统声音与麦克风一起发送；建议使用耳机避免回声")
+            : QString("系统声音采集失败，将自动重试：%1").arg(message);
+    m_systemAudioCheck->setToolTip(detail);
+}
+
 void RoomDialog::on_pb_close_clicked()
 {
     on_pb_quit_clicked();
@@ -584,6 +666,7 @@ void RoomDialog::on_cb_capture_clicked()
     if(ui->cb_capture->isChecked()){
         //        ui->cb_capture->setChecked(false);
         ui->cb_desk->setChecked(false);
+        setSystemAudioControlsEnabled(false);
         // 发信号
         // 摄像头开启，桌面关闭
         Q_EMIT SIG_captureOpen();
@@ -605,6 +688,7 @@ void RoomDialog::on_cb_desk_clicked()
     if(ui->cb_desk->isChecked()){
         //       ui->cb_desk->setChecked(false);
         ui->cb_capture->setChecked(false);
+        setSystemAudioControlsEnabled(true);
 
         // 发信号
         // 桌面开启，摄像头关闭
@@ -614,9 +698,37 @@ void RoomDialog::on_cb_desk_clicked()
     }else{
         //      ui->cb_desk->setChecked(true);
 
+        setSystemAudioControlsEnabled(false);
+
         // 发信号
         // 桌面关闭
         Q_EMIT SIG_deskClose();
+    }
+}
+
+void RoomDialog::setSystemAudioChecked(bool checked)
+{
+    if (!m_systemAudioCheck) {
+        return;
+    }
+    const bool changed = m_systemAudioCheck->isChecked() != checked;
+    const QSignalBlocker blocker(m_systemAudioCheck);
+    m_systemAudioCheck->setChecked(checked);
+    if (changed) {
+        Q_EMIT SIG_systemAudioStateChanged(checked);
+    }
+}
+
+void RoomDialog::setSystemAudioControlsEnabled(bool enabled)
+{
+    if (!enabled) {
+        setSystemAudioChecked(false);
+    }
+    if (m_systemAudioCheck) {
+        m_systemAudioCheck->setEnabled(enabled);
+    }
+    if (m_systemAudioCombo) {
+        m_systemAudioCombo->setEnabled(enabled);
     }
 }
 

@@ -1,4 +1,4 @@
-Audio-Video 1.0.15
+Audio-Video 1.1.0
 =================
 
 System requirements
@@ -10,12 +10,12 @@ System requirements
 
 Installation
 ------------
-Run Audio-Video-Setup-1.0.15.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.1.0.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-Portable-1.0.15.zip, then run Audio-Video.exe.
+Extract Audio-Video-Portable-1.1.0.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration
@@ -39,3 +39,6 @@ Notes
   signed with a commercial code-signing certificate.
 - If camera or microphone access is blocked, enable desktop-app access in
   Windows privacy settings.
+- When desktop sharing, enable 系统声音 to capture the selected Windows playback
+  endpoint. The stream uses the existing 8 kHz voice channel; use headphones to
+  avoid capturing remote audio back into the meeting.

@@ -209,6 +209,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_userSetCommit);
 
     m_audioRead = new Audio_Read;
+    m_systemAudioRead = new SystemAudio_Read;
 
     m_videoRead = new Video_Read;
 
@@ -222,6 +223,15 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
 
     connect(m_audioRead, SIGNAL(SIG_audioFrame(QByteArray&)),
             this, SLOT(slot_sendAudioFrame(QByteArray&)));
+    connect(m_systemAudioRead, &SystemAudio_Read::SIG_audioFrame,
+            m_audioRead, &Audio_Read::slot_systemAudioFrame, Qt::QueuedConnection);
+    connect(m_systemAudioRead, &SystemAudio_Read::SIG_captureError,
+            this, [this](const QString &message) {
+        qWarning() << "System audio capture:" << message;
+        if (m_roomDialog) {
+            m_roomDialog->slot_setSystemAudioError(message);
+        }
+    });
 
     connect(m_videoRead, SIGNAL(SIG_videoFrame(QImage)),
             this, SLOT(slot_refleshCameraVideoImage(QImage)));
@@ -237,6 +247,10 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_audioOpen()));
     connect(m_roomDialog, SIGNAL(SIG_audioClose()),
             this, SLOT(slot_audioClose()));
+    connect(m_roomDialog, &RoomDialog::SIG_systemAudioStateChanged,
+            this, &CKernal::slot_systemAudioStateChanged);
+    connect(m_roomDialog, &RoomDialog::SIG_systemAudioDeviceChanged,
+            this, &CKernal::slot_systemAudioDeviceChanged);
 
     connect(m_roomDialog, SIGNAL(SIG_captureOpen()),
             this, SLOT(slot_captureOpen()));
@@ -317,6 +331,11 @@ void CKernal::slot_destroy()
     m_pendingRoomId = 0;
     m_latencySocket->abort();
     m_controlSocket->abort();
+    if (m_systemAudioRead) {
+        m_systemAudioRead->stopCapture();
+        delete m_systemAudioRead;
+        m_systemAudioRead = nullptr;
+    }
     for (TcpClientMediator*& channel : m_tcpAV) {
         if (channel) {
             channel->CloseNet();
@@ -1124,8 +1143,32 @@ void CKernal::slot_audioClose()
     m_audioRead->pause();
 }
 
+void CKernal::slot_systemAudioStateChanged(bool enabled)
+{
+    if (!m_audioRead || !m_systemAudioRead) {
+        return;
+    }
+    m_audioRead->setSystemAudioEnabled(enabled);
+    if (enabled) {
+        m_systemAudioRead->startCapture();
+    } else {
+        m_systemAudioRead->stopCapture();
+    }
+}
+
+void CKernal::slot_systemAudioDeviceChanged(const QString &deviceId)
+{
+    if (m_systemAudioRead) {
+        m_systemAudioRead->setDeviceId(deviceId);
+    }
+}
+
 void CKernal::slot_captureOpen()
 {
+    slot_systemAudioStateChanged(false);
+    if (m_roomDialog) {
+        m_roomDialog->slot_setSystemAudioError(QString());
+    }
     if (m_activeVideoSource == VideoSource::Camera) {
         return;
     }
@@ -1164,6 +1207,7 @@ void CKernal::slot_deskOpen()
 
 void CKernal::slot_deskClose()
 {
+    slot_systemAudioStateChanged(false);
     m_deskRead->pause();
     if (m_activeVideoSource == VideoSource::Desktop) {
         stopLocalVideo();

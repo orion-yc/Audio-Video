@@ -16,6 +16,7 @@
 #include <map>
 
 #include "audio_read.h"
+#include "system_audio_read.h"
 #include "audio_write.h"
 #include "video_read.h"
 #include "desk_read.h"
@@ -112,6 +113,8 @@ public slots:
     // 音视频控制 开关
     void slot_audioOpen();
     void slot_audioClose();
+    void slot_systemAudioStateChanged(bool enabled);
+    void slot_systemAudioDeviceChanged(const QString &deviceId);
     void slot_captureOpen();
     void slot_captureClose();
     void slot_deskOpen();
@@ -217,7 +220,8 @@ private:
     std::map<int, UserShow*>        m_mapIDToUserShow;
 
     // 音频
-    Audio_Read*                     m_audioRead;
+    Audio_Read*                     m_audioRead = nullptr;
+    SystemAudio_Read*               m_systemAudioRead = nullptr;
     // Audio_Write 每个用户都创建
     std::map<int, Audio_Write*>     m_mapIDToAudioWrite;
     Video_Read*                     m_videoRead;

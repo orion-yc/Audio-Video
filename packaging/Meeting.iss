@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "1.0.15"
+#define AppVersion "1.1.0"
 #endif
 
 #ifndef AppVariant
@@ -30,7 +30,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#DistributionDir}
 OutputBaseFilename={#ArtifactName}-Setup-{#AppVersion}
-SetupIconFile=..\images\message.ico
+SetupIconFile=..\images\app-icon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes

@@ -10,6 +10,7 @@ namespace Ui {
 class RoomDialog;
 }
 class QComboBox;
+class QCheckBox;
 class QEvent;
 class QFrame;
 class QLabel;
@@ -27,6 +28,8 @@ signals:
     // 摄像头 音频 桌面
     void SIG_audioOpen();
     void SIG_audioClose();
+    void SIG_systemAudioStateChanged(bool enabled);
+    void SIG_systemAudioDeviceChanged(const QString &deviceId);
     void SIG_captureOpen();
     void SIG_captureClose();
     void SIG_deskOpen();
@@ -51,6 +54,7 @@ public slots:
     void slot_setBigAvatar(int userid, const QImage &avatar);
     void slot_clearBigImage(int userid);
     void slot_setCaptureState(bool active);
+    void slot_setSystemAudioError(const QString &message);
     void slot_setLatency(int latencyMs);
     void slot_setDesktopSharePending(int frameRate, int bitRate);
     void slot_setDesktopShareStatus(int width, int height, int frameRate, int bitRate,
@@ -87,6 +91,9 @@ private:
     void setChatPanelVisible(bool visible);
     void sendChatMessage();
     void updateChatButton();
+    void setSystemAudioChecked(bool checked);
+    void setSystemAudioControlsEnabled(bool enabled);
+    void refreshSystemAudioDevices();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -98,6 +105,8 @@ protected:
     QComboBox *m_deskResolutionCombo = nullptr;
     QComboBox *m_deskFrameRateCombo = nullptr;
     QComboBox *m_deskScreenCombo = nullptr;
+    QCheckBox *m_systemAudioCheck = nullptr;
+    QComboBox *m_systemAudioCombo = nullptr;
     QFrame *m_chatPanel = nullptr;
     QTextBrowser *m_chatHistory = nullptr;
     QTextEdit *m_chatInput = nullptr;
