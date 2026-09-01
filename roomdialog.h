@@ -94,6 +94,8 @@ private:
     void setSystemAudioChecked(bool checked);
     void setSystemAudioControlsEnabled(bool enabled);
     void refreshSystemAudioDevices();
+    UserShow *userShowForId(int userId) const;
+    void setBigUserFromUserShow(UserShow *user, const QImage &preview);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -112,6 +114,8 @@ protected:
     QTextEdit *m_chatInput = nullptr;
     QPushButton *m_chatButton = nullptr;
     int m_unreadChatCount = 0;
+    int m_localUserId = 0;
+    bool m_bigUserPinnedByUser = false;
 
     // 用于用户列表的垂直布局
     QVBoxLayout* m_userLayout;

@@ -318,6 +318,9 @@ void RoomDialog::slot_removeUser(QWidget *user)
 
 void RoomDialog::slot_setRoomClear()
 {
+    m_localUserId = 0;
+    m_bigUserPinnedByUser = false;
+    ui->wdg_bigShow->slot_clearVideo();
     // 设置ui
     ui->cb_audio->setChecked(false);
     setSystemAudioControlsEnabled(false);
@@ -543,30 +546,68 @@ void RoomDialog::setDesktopShareStatusText(const QString &text, const QString &t
     m_deskStatusLabel->setToolTip(toolTip);
 }
 
-void RoomDialog::slot_setBigImage(int userid, QImage &img)
+UserShow *RoomDialog::userShowForId(int userId) const
 {
-    if(ui->wdg_bigShow->m_id == userid)
-    {
-        ui->wdg_bigShow->slot_setImage(img);
+    if (!m_userLayout) {
+        return nullptr;
     }
+
+    for (int index = 0; index < m_userLayout->count(); ++index) {
+        UserShow *user = qobject_cast<UserShow *>(m_userLayout->itemAt(index)->widget());
+        if (user && user->m_id == userId) {
+            return user;
+        }
+    }
+    return nullptr;
 }
-#include <QDebug>
-void RoomDialog::slot_setBigImageInfo(int userid, QString name)
+
+void RoomDialog::setBigUserFromUserShow(UserShow *user, const QImage &preview)
 {
-    ui->wdg_bigShow->slot_setInfo(userid, name);
-    UserShow *user = qobject_cast<UserShow *>(QObject::sender());
     if (!user) {
         return;
     }
 
+    ui->wdg_bigShow->slot_setInfo(user->m_id, user->m_name);
     const QImage avatar = user->m_avatarImg.isNull()
             ? user->m_defaultImg : user->m_avatarImg;
     ui->wdg_bigShow->slot_setAvatarImage(avatar);
-    ui->wdg_bigShow->slot_setPreviewImage(user->m_img);
+    ui->wdg_bigShow->slot_setPreviewImage(preview.isNull() ? user->m_img : preview);
+}
+
+void RoomDialog::slot_setBigImage(int userid, QImage &img)
+{
+    // Joining a room initially selects the local user. Switch to the first
+    // remote participant that actually sends a frame, unless the user has
+    // explicitly chosen a participant from the side list.
+    if (userid != m_localUserId && !m_bigUserPinnedByUser &&
+            ui->wdg_bigShow->m_id == m_localUserId) {
+        setBigUserFromUserShow(userShowForId(userid), img);
+    }
+
+    if (ui->wdg_bigShow->m_id == userid) {
+        ui->wdg_bigShow->slot_setImage(img);
+    }
+}
+
+void RoomDialog::slot_setBigImageInfo(int userid, QString name)
+{
+    UserShow *user = qobject_cast<UserShow *>(QObject::sender());
+    if (!user || user->m_id != userid) {
+        user = userShowForId(userid);
+    }
+    if (!user) {
+        ui->wdg_bigShow->slot_setInfo(userid, name);
+        return;
+    }
+
+    m_bigUserPinnedByUser = true;
+    setBigUserFromUserShow(user, user->m_img);
 }
 
 void RoomDialog::slot_setBigUser(int userid, const QString &name, const QImage &avatar)
 {
+    m_localUserId = userid;
+    m_bigUserPinnedByUser = false;
     ui->wdg_bigShow->slot_setInfo(userid, name);
     ui->wdg_bigShow->slot_setAvatarImage(avatar);
     ui->wdg_bigShow->slot_setPreviewImage(avatar);

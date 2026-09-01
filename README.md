@@ -10,6 +10,7 @@ Audio-Video is a Windows desktop client for small real-time video meetings. It c
 - Register with an optional nickname and avatar; update the profile later from Settings.
 - Share a camera or desktop and switch between them while in a room.
 - H.264 video with NVIDIA NVENC selected first and an OpenH264 software fallback when NVENC is unavailable.
+- The viewer automatically focuses the first remote video stream and restores its media subscriptions after a connection drop.
 - Speex voice transport and a built-in connection-latency indicator.
 - Optional Windows WASAPI loopback capture during desktop sharing, with a choice of the default or a specific active playback device; the system stream is mixed into the existing microphone transport.
 - Desktop sharing lets the presenter choose 720p, 1080p, 1440p, or 4K and 15, 30, or 60 fps. It automatically selects a matching H.264 bitrate up to 56 Mbps; camera capture targets 1920 x 1080 at 60 fps. The delivered quality still depends on the source, GPU, CPU, network, and receiving device.
@@ -67,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.0
+.\packaging\build-release.ps1 -Version 1.1.1
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.0.exe`
-- `Audio-Video-Portable-1.1.0.zip`
+- `Audio-Video-Setup-1.1.1.exe`
+- `Audio-Video-Portable-1.1.1.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.0
+.\packaging\build-release-msvc.ps1 -Version 1.1.1
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.0.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.0.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.1.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.1.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 

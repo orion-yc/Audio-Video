@@ -10,6 +10,7 @@ Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项�
 - 注册时可选填昵称和头像，也可以在“设置”中后续修改。
 - 在房间内使用摄像头或桌面共享，并可在两者之间切换。
 - 使用 H.264 视频编码，优先使用 NVIDIA NVENC；不可用时自动回退到 OpenH264 软件编码。
+- 观看端会自动聚焦首个远端视频流；媒体连接断开后会恢复订阅，避免进房后一直没有共享画面。
 - 使用 Speex 进行语音传输，并提供连接延迟显示。
 - 桌面共享时可勾选“系统声音”，并选择跟随 Windows 默认播放设备或指定活动输出设备；系统声音会与麦克风复用现有语音通道发送。
 - 桌面共享可由共享者选择 720p、1080p、1440p、4K，以及 15、30、60 fps；客户端会自动匹配最高 56 Mbps 的 H.264 码率。摄像头采集目标为最高 1920 x 1080、60 fps。实际画质会受到采集源、显卡、CPU、网络和接收端设备的共同影响。
@@ -67,21 +68,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.0
+.\packaging\build-release.ps1 -Version 1.1.1
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
 
-- `Audio-Video-Setup-1.1.0.exe`
-- `Audio-Video-Portable-1.1.0.zip`
+- `Audio-Video-Setup-1.1.1.exe`
+- `Audio-Video-Portable-1.1.1.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.0
+.\packaging\build-release-msvc.ps1 -Version 1.1.1
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.0.exe` 和 `Audio-Video-MSVC-Portable-1.1.0.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.1.exe` 和 `Audio-Video-MSVC-Portable-1.1.1.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 

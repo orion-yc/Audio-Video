@@ -43,6 +43,7 @@ namespace {
 constexpr int kMinimumRoomId = 100000;
 constexpr int kMaximumRoomId = 999999;
 constexpr int kRoomRequestTimeoutMs = 8000;
+constexpr int kAvChannelReconnectIntervalMs = 1000;
 constexpr qint64 kDesktopReferencePixelsPerSecond =
         static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
 constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
@@ -195,6 +196,13 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     m_controlReconnectTimer->setInterval(1500);
     connect(m_controlReconnectTimer, &QTimer::timeout,
             this, &CKernal::slot_controlReconnect);
+    for (int channel = 0; channel < 2; ++channel) {
+        m_avReconnectTimers[channel] = new QTimer(this);
+        m_avReconnectTimers[channel]->setSingleShot(true);
+        m_avReconnectTimers[channel]->setInterval(kAvChannelReconnectIntervalMs);
+        connect(m_avReconnectTimers[channel], &QTimer::timeout, this,
+                [this, channel]() { retryAvChannel(channel); });
+    }
     ensureControlConnection();
 
     m_loginDialog->show();
@@ -325,6 +333,11 @@ void CKernal::slot_destroy()
     m_loginTimeoutTimer->stop();
     m_roomRequestTimer->stop();
     m_controlReconnectTimer->stop();
+    for (QTimer *timer : m_avReconnectTimers) {
+        if (timer) {
+            timer->stop();
+        }
+    }
     m_latencyProbeActive = false;
     m_loginPending = false;
     m_roomRequest = RoomRequest::None;
@@ -996,6 +1009,10 @@ void CKernal::slot_setJoinedRoom(int roomid)
     }
     user->slot_setAvatarImage(ownAvatar);
     m_roomDialog->slot_setBigUser(m_userid, m_name, ownAvatar);
+    // The server keeps audio and video subscriptions on dedicated sockets.
+    // Re-register both when entering a room so a viewer never depends on a
+    // connection created before the room join.
+    ensureAvConnections(true);
 }
 
 // 弹出框
@@ -1720,9 +1737,18 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
             if (!decoder) {
                 decoder = std::make_unique<H264Decoder>();
             }
-            QImage decoded;
             const QByteArray encoded(tmp + sizeof(header), encodedLength);
-            if (decoder->decode(encoded, &decoded) && !decoded.isNull()) {
+            QImage decoded;
+            bool decodedFrame = decoder->decode(encoded, &decoded);
+            if (!decodedFrame && (header.flags & H264_PAYLOAD_FLAG_KEYFRAME)) {
+                // A viewer can join mid-stream or reconnect after a decoder
+                // error. A key frame is self-contained, so retry it with a
+                // fresh decoder instead of waiting for a later GOP.
+                decoder = std::make_unique<H264Decoder>();
+                decoded = QImage();
+                decodedFrame = decoder->decode(encoded, &decoded);
+            }
+            if (decodedFrame && !decoded.isNull()) {
                 slot_refleshUserImage(userid, decoded);
             }
             return;
@@ -1794,16 +1820,18 @@ void CKernal::ensureControlConnection()
     m_controlSocket->connectToHost(m_serverIP, m_serverPort);
 }
 
-void CKernal::ensureAvConnections()
+void CKernal::ensureAvConnections(bool forceRegistration)
 {
     for (int i = 0; i < 2; ++i) {
-        ensureAvChannelReady(i);
+        if (!ensureAvChannelReady(i, forceRegistration)) {
+            scheduleAvChannelRecovery(i);
+        }
     }
 }
 
-bool CKernal::ensureAvChannelReady(int channel)
+bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
 {
-    if (channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
+    if (m_shuttingDown || channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
             !hasValidSessionToken(m_sessionToken)) {
         return false;
     }
@@ -1818,7 +1846,12 @@ bool CKernal::ensureAvChannelReady(int channel)
                     this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
         }
         connect(m_tcpAV[channel], &INetMediator::SIG_disConnect, this,
-                [this, channel]() { m_avChannelRegistered[channel].store(false); });
+                [this, channel]() {
+            m_avChannelRegistered[channel].store(false);
+            QMetaObject::invokeMethod(this, [this, channel]() {
+                scheduleAvChannelRecovery(channel);
+            }, Qt::QueuedConnection);
+        });
     }
 
     if (!m_tcpAV[channel]->IsConnected()) {
@@ -1831,7 +1864,7 @@ bool CKernal::ensureAvChannelReady(int channel)
         }
     }
 
-    if (m_avChannelRegistered[channel].load()) {
+    if (m_avChannelRegistered[channel].load() && !forceRegistration) {
         return true;
     }
 
@@ -1854,8 +1887,36 @@ bool CKernal::ensureAvChannelReady(int channel)
     if (!registered) {
         qWarning() << "Unable to register" << (channel == 0 ? "audio" : "video")
                    << "channel.";
+        scheduleAvChannelRecovery(channel);
     }
     return registered;
+}
+
+void CKernal::scheduleAvChannelRecovery(int channel)
+{
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, channel]() {
+            scheduleAvChannelRecovery(channel);
+        }, Qt::QueuedConnection);
+        return;
+    }
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn || m_roomid == 0) {
+        return;
+    }
+    QTimer *timer = m_avReconnectTimers[channel];
+    if (timer && !timer->isActive()) {
+        timer->start();
+    }
+}
+
+void CKernal::retryAvChannel(int channel)
+{
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn || m_roomid == 0) {
+        return;
+    }
+    if (!ensureAvChannelReady(channel, true)) {
+        scheduleAvChannelRecovery(channel);
+    }
 }
 
 void CKernal::sendPendingLogin()
@@ -1974,6 +2035,7 @@ void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
     }
     if (!m_tcpAV[0]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[0].store(false);
+        scheduleAvChannelRecovery(0);
     }
 }
 
@@ -1984,6 +2046,7 @@ void CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
     }
     if (!m_tcpAV[1]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[1].store(false);
+        scheduleAvChannelRecovery(1);
     }
 }
 
