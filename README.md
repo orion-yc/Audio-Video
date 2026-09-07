@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.1
+.\packaging\build-release.ps1 -Version 1.1.2
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.1.exe`
-- `Audio-Video-Portable-1.1.1.zip`
+- `Audio-Video-Setup-1.1.2.exe`
+- `Audio-Video-Portable-1.1.2.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.1
+.\packaging\build-release-msvc.ps1 -Version 1.1.2
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.1.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.1.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.2.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.2.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -113,3 +113,20 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 ## Contributing
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
+
+## Connection recovery in 1.1.2
+
+Deploy the server with media registration acknowledgements before upgrading the
+client. The client requires replies 10021 / 10022; an older server will leave
+media registration waiting for confirmation.
+
+Login has a 20-second overall deadline. Media registration is retried until
+confirmed, and replies from older login sessions are ignored. After control
+reauthentication the client explicitly rejoins the previous room; if that room
+no longer exists, the normal join error is shown. Video reconnection resets the
+codec state, and the meeting window shows connection and receive status.
+
+After a MinGW release build, run `tests/run-network-recovery.ps1` to exercise
+registration and login deadlines against the actual client objects using Qt's
+offscreen platform and a local test listener. It never connects to the configured
+production server. This is not a two-client screen-sharing end-to-end test.

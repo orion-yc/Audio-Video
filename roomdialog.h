@@ -44,6 +44,10 @@ public:
     ~RoomDialog();
 public slots:
     void slot_setRoomID(int roomid);
+    void slot_setMediaStatus(const QString &text);
+private:
+    QLabel* m_mediaStatus = nullptr;
+public slots:
 
     void slot_addUser(QWidget* user);
     void slot_removeUser(QWidget* user);

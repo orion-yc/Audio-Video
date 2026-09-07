@@ -441,3 +441,16 @@ static_assert(sizeof(STRU_VIDEO_REGISTER) == 44,
 
 
 
+
+// Media registration acknowledgement; success is zero. Echo the session token
+// so a delayed response from an earlier login cannot authenticate a channel.
+#define DEF_PACK_AUDIO_REGISTER_RS (DEF_PACK_BASE + 21)
+#define DEF_PACK_VIDEO_REGISTER_RS (DEF_PACK_BASE + 22)
+struct STRU_MEDIA_REGISTER_RS {
+    PackType type;
+    int userId;
+    int result;
+    char sessionToken[SESSION_TOKEN_SIZE];
+};
+static_assert(sizeof(STRU_MEDIA_REGISTER_RS) == 48, "media acknowledgement layout");
+

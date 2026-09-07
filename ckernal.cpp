@@ -297,6 +297,10 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     m_latencyTimeoutTimer->setInterval(1500);
     m_loginTimeoutTimer->setSingleShot(true);
     m_loginTimeoutTimer->setInterval(6000);
+    m_loginDeadline = new QTimer(this);
+    m_loginDeadline->setSingleShot(true);
+    m_loginDeadline->setInterval(20000);
+    connect(m_loginDeadline, &QTimer::timeout, this, &CKernal::failLogin);
     m_roomRequestTimer->setSingleShot(true);
     m_roomRequestTimer->setInterval(kRoomRequestTimeoutMs);
     connect(m_latencyTimer, &QTimer::timeout,
@@ -328,6 +332,9 @@ void CKernal::slot_destroy()
 {
     qDebug() <<  __func__;
     m_shuttingDown = true;
+    m_avChannelRegistered[0].store(false);
+    m_avChannelRegistered[1].store(false);
+    m_loginDeadline->stop();
     m_latencyTimer->stop();
     m_latencyTimeoutTimer->stop();
     m_loginTimeoutTimer->stop();
@@ -547,7 +554,10 @@ void CKernal::slot_dealAudioChannelData(uint socket, char *buf, int nlen)
     }
     int type = 0;
     memcpy(&type, buf, sizeof(type));
-    if (type == DEF_PACK_AUDIO_FRAME) {
+    if (type == DEF_PACK_AUDIO_REGISTER_RS) {
+        handleMediaRegistration(0, buf, nlen);
+        delete[] buf;
+    } else if (type == DEF_PACK_AUDIO_FRAME && m_avChannelRegistered[0].load()) {
         slot_dealData(socket, buf, nlen);
     } else {
         delete[] buf;
@@ -562,7 +572,10 @@ void CKernal::slot_dealVideoChannelData(uint socket, char *buf, int nlen)
     }
     int type = 0;
     memcpy(&type, buf, sizeof(type));
-    if (type == DEF_PACK_VIDEO_FRAME) {
+    if (type == DEF_PACK_VIDEO_REGISTER_RS) {
+        handleMediaRegistration(1, buf, nlen);
+        delete[] buf;
+    } else if (type == DEF_PACK_VIDEO_FRAME && m_avChannelRegistered[1].load()) {
         slot_dealData(socket, buf, nlen);
     } else {
         delete[] buf;
@@ -594,6 +607,8 @@ void CKernal::slot_dealData(uint socket, char *buf, int nlen)
 void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 {
     Q_UNUSED(socket);
+    if (!m_loginPending) return;
+    m_loginDeadline->stop();
     // Every 10003 response, including a failure response, ends the pending UI
     // state. The control receive buffer has already assembled the outer frame.
     m_loginTimeoutTimer->stop();
@@ -657,6 +672,20 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
     // Audio and video have their own channels. They receive the same complete
     // token only after the control connection has authenticated this user.
     ensureAvConnections();
+    // Reauthentication creates a new server session with no room membership.
+    // Rejoin explicitly instead of keeping a room UI that cannot receive media.
+    if (m_roomid != 0) {
+        const int previousRoom = m_roomid;
+        slot_quitRoom();
+        STRU_JOINROOM_RQ request;
+        request.m_UserID = m_userid;
+        request.m_RoomID = previousRoom;
+        beginRoomRequest(RoomRequest::Join, previousRoom);
+        if (!slot_clientSendData(0, reinterpret_cast<char*>(&request), sizeof(request))) {
+            clearRoomRequest();
+            m_demoDialog->slot_setPushButton_enable(true);
+        }
+    }
     QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
 
@@ -1750,6 +1779,9 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
             }
             if (decodedFrame && !decoded.isNull()) {
                 slot_refleshUserImage(userid, decoded);
+                m_roomDialog->slot_setMediaStatus("正在接收画面");
+            } else {
+                m_roomDialog->slot_setMediaStatus("等待可解码画面…");
             }
             return;
         }
@@ -1831,6 +1863,14 @@ void CKernal::ensureAvConnections(bool forceRegistration)
 
 bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
 {
+    if (channel < 0 || channel > 1) return false;
+    // Connection lifecycle and Qt timers belong to the GUI thread. Video sends
+    // may originate on SendThread, which only reads the atomic ready flag.
+    if (QThread::currentThread() != thread()) {
+        if (m_avChannelRegistered[channel].load()) return true;
+        scheduleAvChannelRecovery(channel);
+        return false;
+    }
     if (m_shuttingDown || channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
             !hasValidSessionToken(m_sessionToken)) {
         return false;
@@ -1868,6 +1908,14 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         return true;
     }
 
+    if (m_avRegistrationPending[channel] &&
+            m_avRegistrationElapsed[channel].elapsed() < 3000) return false;
+    const bool registrationTimedOut = m_avRegistrationPending[channel];
+    m_avChannelRegistered[channel].store(false);
+    m_avRegistrationPending[channel] = true;
+    m_avRegistrationElapsed[channel].start();
+    if (channel == 1) m_roomDialog->slot_setMediaStatus(registrationTimedOut
+            ? "视频确认超时，正在重试…" : "视频连接中…");
     bool registered = false;
     if (channel == 0) {
         STRU_AUDIO_REGISTER request;
@@ -1883,13 +1931,15 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
                                                 sizeof(request));
     }
 
-    m_avChannelRegistered[channel].store(registered);
+    // Writing a request is not proof the server accepted the registration.
+    m_avRegistrationPending[channel] = registered;
+    scheduleAvChannelRecovery(channel);
     if (!registered) {
         qWarning() << "Unable to register" << (channel == 0 ? "audio" : "video")
                    << "channel.";
         scheduleAvChannelRecovery(channel);
     }
-    return registered;
+    return false;
 }
 
 void CKernal::scheduleAvChannelRecovery(int channel)
@@ -1900,7 +1950,7 @@ void CKernal::scheduleAvChannelRecovery(int channel)
         }, Qt::QueuedConnection);
         return;
     }
-    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn || m_roomid == 0) {
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn) {
         return;
     }
     QTimer *timer = m_avReconnectTimers[channel];
@@ -1911,10 +1961,10 @@ void CKernal::scheduleAvChannelRecovery(int channel)
 
 void CKernal::retryAvChannel(int channel)
 {
-    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn || m_roomid == 0) {
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn) {
         return;
     }
-    if (!ensureAvChannelReady(channel, true)) {
+    if (!ensureAvChannelReady(channel)) {
         scheduleAvChannelRecovery(channel);
     }
 }
@@ -1952,6 +2002,10 @@ void CKernal::resetAuthenticationState()
     m_avatarUploadPending = false;
     m_avChannelRegistered[0].store(false);
     m_avChannelRegistered[1].store(false);
+    for (int channel = 0; channel < 2; ++channel) {
+        m_avRegistrationPending[channel] = false;
+        m_avReconnectTimers[channel]->stop();
+    }
 }
 
 void CKernal::scheduleControlReconnect()
@@ -1977,6 +2031,7 @@ void CKernal::beginControlRecovery()
         m_demoDialog->slot_setPushButton_enable(true);
     }
     if (shouldRelogin) {
+        if (!m_loginDeadline->isActive()) m_loginDeadline->start();
         m_loginPending = true;
         if (m_loginDialog) {
             m_loginDialog->slot_setLoginPending(true);
@@ -1986,6 +2041,45 @@ void CKernal::beginControlRecovery()
         } else {
             scheduleControlReconnect();
         }
+    }
+}
+
+void CKernal::failLogin()
+{
+    if (!m_loginPending) return;
+    m_loginPending = false;
+    m_loginRequest.clear();
+    m_loginTimeoutTimer->stop();
+    m_controlReconnectTimer->stop();
+    resetAuthenticationState();
+    m_controlSocket->abort();
+    slot_quitRoom();
+    m_demoDialog->hide();
+    m_loginDialog->slot_setLoginPending(false);
+    m_loginDialog->showNormal();
+    QMessageBox::warning(m_loginDialog, "连接失败", "登录等待已超过20秒，请检查网络或服务器后重新登录。");
+}
+
+void CKernal::handleMediaRegistration(int channel, const char* buffer, int length)
+{
+    if (!m_loggedIn || !m_avRegistrationPending[channel] ||
+            length != static_cast<int>(sizeof(STRU_MEDIA_REGISTER_RS))) return;
+    STRU_MEDIA_REGISTER_RS response = {};
+    memcpy(&response, buffer, sizeof(response));
+    if (response.userId != m_userid ||
+            memcmp(response.sessionToken, m_sessionToken, SESSION_TOKEN_SIZE) != 0) return;
+    m_avRegistrationPending[channel] = false;
+    m_avChannelRegistered[channel].store(response.result == 0);
+    if (response.result != 0) {
+        if (channel == 1) m_roomDialog->slot_setMediaStatus("视频认证失败，正在重试…");
+        scheduleAvChannelRecovery(channel);
+        return;
+    }
+    m_avReconnectTimers[channel]->stop();
+    if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        Q_EMIT SIG_resetVideoEncoder();
+        m_roomDialog->slot_setMediaStatus("视频已连接");
     }
 }
 
@@ -2074,6 +2168,7 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 
     resetAuthenticationState();
     m_loginRequest = loginRequest;
+    m_loginDeadline->start();
     m_loginPending = true;
     m_loginDialog->slot_setLoginPending(true);
     // Start the deadline before connecting as well as after writing. A proxy

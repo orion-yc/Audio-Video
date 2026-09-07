@@ -190,6 +190,11 @@ private:
     bool ensureAvChannelReady(int channel, bool forceRegistration = false);
     void scheduleAvChannelRecovery(int channel);
     void retryAvChannel(int channel);
+    void handleMediaRegistration(int channel, const char* buffer, int length);
+    void failLogin();
+    bool m_avRegistrationPending[2] = { false, false };
+    QElapsedTimer m_avRegistrationElapsed[2];
+    QTimer* m_loginDeadline = nullptr;
     void sendPendingLogin();
     void sendPendingRegistration();
     void resetAuthenticationState();

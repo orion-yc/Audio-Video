@@ -51,6 +51,8 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->pb_close->setToolTip("退出会议");
 
     ui->horizontalLayout->insertWidget(0, m_latencyLabel);
+    m_mediaStatus = new QLabel("视频未连接", this);
+    ui->horizontalLayout->insertWidget(1, m_mediaStatus);
     m_deskStatusLabel = new QLabel("共享 未开始", this);
     m_deskStatusLabel->setObjectName("lb_deskStatus");
     m_deskStatusLabel->setMinimumHeight(28);
@@ -782,3 +784,8 @@ void RoomDialog::on_cbx_moji_currentIndexChanged(int index)
     }
 }
 
+
+void RoomDialog::slot_setMediaStatus(const QString &text)
+{
+    m_mediaStatus->setText(text);
+}
