@@ -442,8 +442,9 @@ static_assert(sizeof(STRU_VIDEO_REGISTER) == 44,
 
 
 
-// Media registration acknowledgement; success is zero. Echo the session token
-// so a delayed response from an earlier login cannot authenticate a channel.
+// Optional media registration acknowledgement. Legacy servers accept the
+// registration request without sending this response; a nonzero result from a
+// newer server revokes the already-open media channel.
 #define DEF_PACK_AUDIO_REGISTER_RS (DEF_PACK_BASE + 21)
 #define DEF_PACK_VIDEO_REGISTER_RS (DEF_PACK_BASE + 22)
 struct STRU_MEDIA_REGISTER_RS {

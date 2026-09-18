@@ -1,7 +1,6 @@
 #include <QObject>
 #include <QAbstractSocket>
 #include <QByteArray>
-#include <QElapsedTimer>
 #include <QTcpSocket>
 #include <QTimer>
 #include <logindialog.h>
@@ -64,31 +63,29 @@ int main(int argc, char** argv)
     kernel->m_userid = 7;
     memset(kernel->m_sessionToken, 'a', 32);
     kernel->m_sessionToken[32] = 0;
-    check(!kernel->ensureAvChannelReady(1), "request write does not imply registration");
-    check(kernel->m_avRegistrationPending[1] && !kernel->m_avChannelRegistered[1],
-          "video remains pending before acknowledgement");
+    int resets = 0;
+    QObject::connect(kernel, &CKernal::SIG_resetVideoEncoder, &app, [&] { ++resets; });
+    check(kernel->ensureAvChannelReady(1),
+          "legacy server registration write enables video without acknowledgement");
+    check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
+          && resets == 1, "legacy no-ack channel is immediately ready for frames");
     STRU_MEDIA_REGISTER_RS response = {};
     response.type = DEF_PACK_VIDEO_REGISTER_RS;
     response.userId = 7;
     memset(response.sessionToken, 'b', 32);
     kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
-    check(!kernel->m_avChannelRegistered[1] && kernel->m_avRegistrationPending[1],
-          "old session acknowledgement ignored");
+    check(kernel->m_avChannelRegistered[1], "old session acknowledgement ignored");
     memcpy(response.sessionToken, kernel->m_sessionToken, SESSION_TOKEN_SIZE);
     response.result = 1;
     kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
     check(!kernel->m_avChannelRegistered[1] && kernel->m_avReconnectTimers[1]->isActive(),
           "rejected registration schedules retry");
-    kernel->m_avRegistrationPending[1] = true;
     response.result = 0;
-    int resets = 0;
-    QObject::connect(kernel, &CKernal::SIG_resetVideoEncoder, &app, [&] { ++resets; });
     kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
     check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
-          && resets == 1, "valid acknowledgement enables media and resets encoder");
+          && resets == 1, "valid optional acknowledgement keeps media enabled");
     kernel->resetAuthenticationState();
-    check(!kernel->m_avChannelRegistered[1] && !kernel->m_avRegistrationPending[1],
-          "reauthentication clears media readiness");
+    check(!kernel->m_avChannelRegistered[1], "reauthentication clears media readiness");
 
     check(kernel->m_controlSocket->state() == QAbstractSocket::ConnectedState ||
           kernel->m_controlSocket->waitForConnected(1000), "local control connection established");
@@ -106,8 +103,8 @@ int main(int argc, char** argv)
     joined.m_lResult = join_success;
     joined.m_RoomID = 123456;
     kernel->slot_dealJoinRoomRs(0, reinterpret_cast<char*>(&joined), sizeof(joined));
-    check(kernel->m_roomid == 123456 && !kernel->m_avChannelRegistered[1],
-          "room rejoin still requires media confirmation");
+    check(kernel->m_roomid == 123456 && kernel->m_avChannelRegistered[1],
+          "room rejoin supports legacy servers without media acknowledgement");
     kernel->m_roomDialog->grab().save(QApplication::applicationDirPath() + "/room-status.png");
     kernel->slot_quitRoom();
 

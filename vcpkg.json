@@ -1,6 +1,6 @@
 {
   "name": "audio-video",
-  "version-string": "1.1.2",
+  "version-string": "1.1.4",
   "dependencies": [
     {
       "name": "opencv4",

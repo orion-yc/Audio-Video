@@ -38,7 +38,7 @@ Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项�
 
 ```ini
 [Net]
-host=www.onnotify.top
+host=8.163.3.67
 port=8000
 ```
 
@@ -68,21 +68,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.2
+.\packaging\build-release.ps1 -Version 1.1.4
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
 
-- `Audio-Video-Setup-1.1.2.exe`
-- `Audio-Video-Portable-1.1.2.zip`
+- `Audio-Video-Setup-1.1.4.exe`
+- `Audio-Video-Portable-1.1.4.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.2
+.\packaging\build-release-msvc.ps1 -Version 1.1.4
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.2.exe` 和 `Audio-Video-MSVC-Portable-1.1.2.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.4.exe` 和 `Audio-Video-MSVC-Portable-1.1.4.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -114,13 +114,17 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.2 连接恢复说明
+## 1.1.4 连接恢复与服务地址说明
 
-请先部署支持音视频注册确认的服务端，再升级客户端。客户端等待协议
-10021 / 10022 的注册结果，旧服务端不会返回确认，视频状态会显示确认超时。
+客户端默认直连 `8.163.3.67:8000`。原域名目前经过 Cloudflare 的 HTTP 代理，
+无法转发本项目的原始 TCP 协议；仅在服务端地址变更时修改程序同目录的 `config.ini`。
+
+音视频注册同时兼容两种服务端：旧服务端收到 10013 / 10014 注册请求后直接开始转发，
+不会回复确认；新服务端可以额外返回 10021 / 10022。客户端成功写出注册包后立即打开
+通道，只有 TCP 断开或可选确认明确拒绝时才会重连。
 
 - 登录总等待时间为 20 秒，超时后恢复登录按钮并提示重试。
-- 音视频注册确认超时或连接中断时自动重试；旧登录令牌的回复不会生效。
+- 音视频 TCP 连接中断时自动重连；旧登录令牌的回复不会生效。
 - 控制连接重新登录后重新申请加入原房间，房间已不存在时提示加入失败。
 - 视频通道恢复后重置编码和解码状态，会议窗口显示连接及画面接收状态。
 

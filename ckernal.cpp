@@ -1908,14 +1908,12 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         return true;
     }
 
-    if (m_avRegistrationPending[channel] &&
-            m_avRegistrationElapsed[channel].elapsed() < 3000) return false;
-    const bool registrationTimedOut = m_avRegistrationPending[channel];
     m_avChannelRegistered[channel].store(false);
-    m_avRegistrationPending[channel] = true;
-    m_avRegistrationElapsed[channel].start();
-    if (channel == 1) m_roomDialog->slot_setMediaStatus(registrationTimedOut
-            ? "视频确认超时，正在重试…" : "视频连接中…");
+    // Legacy servers accept the 44-byte registration request but do not send
+    // an acknowledgement.  A successful TCP write therefore makes this media
+    // channel usable immediately; an optional later acknowledgement can still
+    // revoke it if the server explicitly rejects the request.
+    if (channel == 1) m_roomDialog->slot_setMediaStatus("视频连接中…");
     bool registered = false;
     if (channel == 0) {
         STRU_AUDIO_REGISTER request;
@@ -1931,15 +1929,24 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
                                                 sizeof(request));
     }
 
-    // Writing a request is not proof the server accepted the registration.
-    m_avRegistrationPending[channel] = registered;
-    scheduleAvChannelRecovery(channel);
     if (!registered) {
+        m_avChannelRegistered[channel].store(false);
         qWarning() << "Unable to register" << (channel == 0 ? "audio" : "video")
                    << "channel.";
         scheduleAvChannelRecovery(channel);
+        return false;
     }
-    return false;
+
+    m_avChannelRegistered[channel].store(true);
+    // Keep accepting a matching optional 10021/10022 response. Older
+    // deployments never send it, and must not be retried just for that.
+    m_avReconnectTimers[channel]->stop();
+    if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        Q_EMIT SIG_resetVideoEncoder();
+        m_roomDialog->slot_setMediaStatus("视频已连接，等待画面…");
+    }
+    return true;
 }
 
 void CKernal::scheduleAvChannelRecovery(int channel)
@@ -2003,7 +2010,6 @@ void CKernal::resetAuthenticationState()
     m_avChannelRegistered[0].store(false);
     m_avChannelRegistered[1].store(false);
     for (int channel = 0; channel < 2; ++channel) {
-        m_avRegistrationPending[channel] = false;
         m_avReconnectTimers[channel]->stop();
     }
 }
@@ -2062,13 +2068,12 @@ void CKernal::failLogin()
 
 void CKernal::handleMediaRegistration(int channel, const char* buffer, int length)
 {
-    if (!m_loggedIn || !m_avRegistrationPending[channel] ||
+    if (channel < 0 || channel > 1 || !m_loggedIn ||
             length != static_cast<int>(sizeof(STRU_MEDIA_REGISTER_RS))) return;
     STRU_MEDIA_REGISTER_RS response = {};
     memcpy(&response, buffer, sizeof(response));
     if (response.userId != m_userid ||
             memcmp(response.sessionToken, m_sessionToken, SESSION_TOKEN_SIZE) != 0) return;
-    m_avRegistrationPending[channel] = false;
     m_avChannelRegistered[channel].store(response.result == 0);
     if (response.result != 0) {
         if (channel == 1) m_roomDialog->slot_setMediaStatus("视频认证失败，正在重试…");
@@ -2077,8 +2082,6 @@ void CKernal::handleMediaRegistration(int channel, const char* buffer, int lengt
     }
     m_avReconnectTimers[channel]->stop();
     if (channel == 1) {
-        m_mapIDToVideoDecoder.clear();
-        Q_EMIT SIG_resetVideoEncoder();
         m_roomDialog->slot_setMediaStatus("视频已连接");
     }
 }

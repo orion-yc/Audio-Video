@@ -4,7 +4,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++17
 
-VERSION = 1.1.2.0
+VERSION = 1.1.4.0
 TARGET = Audio-Video
 QMAKE_TARGET_PRODUCT = Audio-Video
 QMAKE_TARGET_DESCRIPTION = Audio-Video conferencing client

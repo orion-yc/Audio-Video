@@ -38,7 +38,7 @@ The desktop client reads `config.ini` next to `Audio-Video.exe`:
 
 ```ini
 [Net]
-host=www.onnotify.top
+host=8.163.3.67
 port=8000
 ```
 
@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.2
+.\packaging\build-release.ps1 -Version 1.1.4
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.2.exe`
-- `Audio-Video-Portable-1.1.2.zip`
+- `Audio-Video-Setup-1.1.4.exe`
+- `Audio-Video-Portable-1.1.4.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.2
+.\packaging\build-release-msvc.ps1 -Version 1.1.4
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.2.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.2.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.4.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.4.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -114,14 +114,20 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Connection recovery in 1.1.2
+## Connection recovery and endpoint in 1.1.4
 
-Deploy the server with media registration acknowledgements before upgrading the
-client. The client requires replies 10021 / 10022; an older server will leave
-media registration waiting for confirmation.
+The default client endpoint is `8.163.3.67:8000`. The previous hostname is
+currently routed through a Cloudflare HTTP proxy and cannot carry this raw TCP
+protocol. Update the adjacent `config.ini` only when the server endpoint changes.
 
-Login has a 20-second overall deadline. Media registration is retried until
-confirmed, and replies from older login sessions are ignored. After control
+Media registration supports both server variants. A legacy server begins relay
+after the 10013 / 10014 registration request and sends no response; a newer
+server may additionally return 10021 / 10022. The client opens the channel
+after the registration write and reconnects only if TCP fails or an optional
+matching response explicitly rejects it.
+
+Login has a 20-second overall deadline. Media channels reconnect after TCP
+failure, and replies from older login sessions are ignored. After control
 reauthentication the client explicitly rejoins the previous room; if that room
 no longer exists, the normal join error is shown. Video reconnection resets the
 codec state, and the meeting window shows connection and receive status.

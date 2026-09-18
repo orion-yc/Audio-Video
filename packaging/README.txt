@@ -1,21 +1,21 @@
-Audio-Video 1.1.2
+Audio-Video 1.1.4
 =================
 
 System requirements
 -------------------
 - Windows 10 or Windows 11, 64-bit
-- Internet access to www.onnotify.top:8000
+- Internet access to 8.163.3.67:8000
 - Camera and microphone for audio/video meetings
 - For NVIDIA NVENC hardware encoding, an NVIDIA driver compatible with NVENC API 13.1
 
 Installation
 ------------
-Run Audio-Video-Setup-1.1.2.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.1.4.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-Portable-1.1.2.zip, then run Audio-Video.exe.
+Extract Audio-Video-Portable-1.1.4.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration
@@ -23,7 +23,7 @@ Configuration
 The server is configured in config.ini next to Audio-Video.exe:
 
 [Net]
-host=www.onnotify.top
+host=8.163.3.67
 port=8000
 
 Notes
