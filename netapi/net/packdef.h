@@ -76,6 +76,7 @@
 
 
 typedef int PackType;
+static_assert(sizeof(PackType) == 4, "Wire protocol requires a 32-bit PackType.");
 
 //协议结构
 //注册
@@ -148,6 +149,8 @@ static_assert(offsetof(STRU_LOGIN_RS, type) == 0 &&
               offsetof(STRU_LOGIN_RS, result) == 8 &&
               offsetof(STRU_LOGIN_RS, sessionToken) == 12,
               "Login response field offsets must remain stable.");
+static_assert(sizeof(STRU_REGISTER_RQ) == 84 && sizeof(STRU_REGISTER_RS) == 8,
+              "Registration protocol layouts must remain stable.");
 
 ////用户信息
 //typedef struct STRU_USER_INFO
@@ -273,6 +276,15 @@ typedef struct STRU_USER_INFO_RQ
     char m_userFeeling[_MAX_SIZE];
 
 }STRU_USER_INFO_RQ;
+
+static_assert(sizeof(STRU_CREATEROOM_RQ) == 8 &&
+              sizeof(STRU_CREATEROOM_RS) == 12 &&
+              sizeof(STRU_JOINROOM_RQ) == 12 &&
+              sizeof(STRU_JOINROOM_RS) == 12 &&
+              sizeof(STRU_ROOM_MEMBER_RQ) == 48 &&
+              sizeof(STRU_LEAVEROOM_RQ) == 52 &&
+              sizeof(STRU_USER_INFO_RQ) == 92,
+              "Room and user-info protocol layouts must remain stable.");
 
 // 自定义头像上传。图片内容紧跟固定头部，使用客户端压缩后的 JPEG 数据。
 typedef struct STRU_AVATAR_UPLOAD_RQ

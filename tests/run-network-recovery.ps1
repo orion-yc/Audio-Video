@@ -14,7 +14,7 @@ network-test:
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) ../tests/network_recovery.cpp -o network-test/network_recovery.o
 	$(LINKER) $(LFLAGS) -o network-test/network_recovery.exe @network-test/objects $(LIBS)
 '@ | Set-Content -Encoding ascii (Join-Path $output 'test.mk')
-$env:PATH = "E:/App/Qt/Tools/mingw1310_64/bin;E:/App/Qt/6.11.1/mingw_64/bin;$project/dist/MinGW/Audio-Video-1.1.4;$env:PATH"
+$env:PATH = "E:/App/Qt/Tools/mingw1310_64/bin;E:/App/Qt/6.11.1/mingw_64/bin;$project/dist/MinGW/Audio-Video-1.1.5;$env:PATH"
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_PLUGIN_PATH = 'E:/App/Qt/6.11.1/mingw_64/plugins'
 Push-Location $build

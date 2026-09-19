@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.4
+.\packaging\build-release.ps1 -Version 1.1.5
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.4.exe`
-- `Audio-Video-Portable-1.1.4.zip`
+- `Audio-Video-Setup-1.1.5.exe`
+- `Audio-Video-Portable-1.1.5.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.4
+.\packaging\build-release-msvc.ps1 -Version 1.1.5
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.4.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.4.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.5.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.5.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -114,7 +114,7 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Connection recovery and endpoint in 1.1.4
+## Connection recovery, endpoint and protocol safeguards in 1.1.5
 
 The default client endpoint is `8.163.3.67:8000`. The previous hostname is
 currently routed through a Cloudflare HTTP proxy and cannot carry this raw TCP
@@ -131,6 +131,16 @@ failure, and replies from older login sessions are ignored. After control
 reauthentication the client explicitly rejoins the previous room; if that room
 no longer exists, the normal join error is shown. Video reconnection resets the
 codec state, and the meeting window shows connection and receive status.
+
+The client now asserts the exact layout of registration, room and profile
+packets at build time, preventing a compiler or field-order change from silently
+breaking compatibility with the server.
+
+## Transport security
+
+The current protocol is raw TCP and is not protected by TLS. Until a TLS
+certificate and matching server deployment are introduced, run it only over a
+trusted network or VPN and restrict the server firewall to known client IPs.
 
 After a MinGW release build, run `tests/run-network-recovery.ps1` to exercise
 registration and login deadlines against the actual client objects using Qt's
