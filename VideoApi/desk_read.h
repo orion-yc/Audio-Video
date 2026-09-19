@@ -54,6 +54,8 @@ private:
     std::atomic_int m_maxWidth;
     std::atomic_int m_maxHeight;
     std::atomic_int m_frameRate;
+    std::atomic_int m_cursorX { 0 };
+    std::atomic_int m_cursorY { 0 };
     mutable QMutex m_captureScreenMutex;
     QString m_captureScreenName;
 };

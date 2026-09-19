@@ -68,21 +68,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.7
+.\packaging\build-release.ps1 -Version 1.1.8
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
 
-- `Audio-Video-Setup-1.1.7.exe`
-- `Audio-Video-Portable-1.1.7.zip`
+- `Audio-Video-Setup-1.1.8.exe`
+- `Audio-Video-Portable-1.1.8.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.7
+.\packaging\build-release-msvc.ps1 -Version 1.1.8
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.7.exe` 和 `Audio-Video-MSVC-Portable-1.1.7.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.8.exe` 和 `Audio-Video-MSVC-Portable-1.1.8.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -113,6 +113,12 @@ tests/          编解码冒烟测试
 ## 参与贡献
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
+
+## 1.1.8 桌面共享关键帧与鼠标指针
+
+发送端会保留已排队的 H.264 关键帧，直到它真正写入视频通道；后续预测帧仍可替换以降低延迟，
+但不能再覆盖新观看端开始解码所必需的画面。桌面共享默认把鼠标指针合成进画面，观看端无需
+额外设置或提示即可看到鼠标操作。加入房间的房间号输入框使用黑色数字，确保清楚可见。
 
 ## 1.1.7 桌面共享自动恢复与连接保护说明
 

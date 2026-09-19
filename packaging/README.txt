@@ -1,4 +1,4 @@
-Audio-Video 1.1.7
+Audio-Video 1.1.8
 =================
 
 System requirements
@@ -10,12 +10,12 @@ System requirements
 
 Installation
 ------------
-Run Audio-Video-Setup-1.1.7.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.1.8.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-Portable-1.1.7.zip, then run Audio-Video.exe.
+Extract Audio-Video-Portable-1.1.8.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration
@@ -34,6 +34,8 @@ Notes
   actual capture, encode, and send FPS in the meeting window.
 - A stalled capture, encoder, or video channel is recovered automatically;
   starting a new share refreshes the video-channel registration.
+- Shared desktops include the mouse pointer automatically. H.264 key frames
+  are preserved ahead of delta frames so a receiver can always begin decoding.
 - Everyone in the room should use an Audio-Video client with H.264 support.
   This version can still receive JPEG video from earlier clients.
 - The server only relays the video payload and needs no H.264 configuration.

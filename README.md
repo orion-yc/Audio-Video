@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.7
+.\packaging\build-release.ps1 -Version 1.1.8
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.7.exe`
-- `Audio-Video-Portable-1.1.7.zip`
+- `Audio-Video-Setup-1.1.8.exe`
+- `Audio-Video-Portable-1.1.8.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.7
+.\packaging\build-release-msvc.ps1 -Version 1.1.8
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.7.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.7.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.8.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.8.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -113,6 +113,15 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 ## Contributing
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
+
+## Desktop sharing in 1.1.8
+
+The sender preserves a queued H.264 key frame until it has been written to the
+video channel. Later delta frames may still be replaced to keep latency low,
+but can no longer overwrite the frame a newly joined viewer needs to start
+decoding. The mouse pointer is composited into shared-desktop pixels by default;
+viewers require no extra setting or notification. The room-number dialog uses
+black digits on its input field for reliable readability.
 
 ## Desktop-sharing recovery and connection safeguards in 1.1.7
 

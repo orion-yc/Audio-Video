@@ -1,5 +1,47 @@
 #include "desk_read.h"
 
+#include <QCursor>
+#include <QPainter>
+#include <QPolygonF>
+
+namespace {
+
+void overlayCursor(QImage *image, QScreen *screen, const QPoint &globalCursor)
+{
+    if (!image || image->isNull() || !screen) {
+        return;
+    }
+
+    const QRect screenGeometry = screen->geometry();
+    if (screenGeometry.isEmpty() || !screenGeometry.contains(globalCursor)) {
+        return;
+    }
+
+    const qreal xScale = static_cast<qreal>(image->width()) / screenGeometry.width();
+    const qreal yScale = static_cast<qreal>(image->height()) / screenGeometry.height();
+    const QPointF cursorPosition((globalCursor.x() - screenGeometry.x()) * xScale,
+                                 (globalCursor.y() - screenGeometry.y()) * yScale);
+    const qreal scale = qBound<qreal>(0.75, image->width() / 1920.0, 1.4);
+
+    QPainter painter(image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.translate(cursorPosition);
+    painter.setPen(QPen(Qt::white, qMax<qreal>(1.0, 1.8 * scale), Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(16, 20, 24));
+    QPolygonF pointer;
+    pointer << QPointF(0, 0)
+            << QPointF(0, 18 * scale)
+            << QPointF(4.5 * scale, 14 * scale)
+            << QPointF(8.5 * scale, 23 * scale)
+            << QPointF(12.5 * scale, 21 * scale)
+            << QPointF(8.5 * scale, 12 * scale)
+            << QPointF(15 * scale, 12 * scale);
+    painter.drawPolygon(pointer);
+}
+
+} // namespace
+
 Desk_Read::Desk_Read(QObject *parent) : QObject(parent)
   ,m_deskReadThread(new DeskReadThread)
   ,m_capturing(false)
@@ -87,6 +129,12 @@ void Desk_Read::slot_scheduleFrame()
         return;
     }
 
+    // Query the cursor from the GUI thread.  The actual screenshot work runs
+    // in a worker, while the position is atomically carried with that frame.
+    const QPoint cursorPosition = QCursor::pos();
+    m_cursorX.store(cursorPosition.x());
+    m_cursorY.store(cursorPosition.y());
+
     bool expected = false;
     if (!m_frameQueued.compare_exchange_strong(expected, true)) {
         return;
@@ -120,6 +168,10 @@ void Desk_Read::slot_getScreenFrame()
         image = image.scaled(maxWidth, maxHeight,
                              Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
+    // QScreen::grabWindow does not include the hardware cursor on Windows.
+    // Composite the current pointer into the shared pixels automatically so
+    // viewers see mouse operations without any extra UI or notification.
+    overlayCursor(&image, src, QPoint(m_cursorX.load(), m_cursorY.load()));
     if (m_capturing.load() && !image.isNull()) {
         Q_EMIT SIG_screenFrame(image.copy());
     }

@@ -2352,13 +2352,24 @@ void CKernal::slot_joinRoom()
         return;
     }
 
-    bool accepted = false;
-    const int roomid = QInputDialog::getInt(m_demoDialog, "加入房间", "房间号:",
-                                            kMinimumRoomId, kMinimumRoomId,
-                                            kMaximumRoomId, 1, &accepted);
-    if (!accepted) {
+    QInputDialog roomDialog(m_demoDialog);
+    roomDialog.setWindowTitle("加入房间");
+    roomDialog.setLabelText("房间号:");
+    roomDialog.setInputMode(QInputDialog::IntInput);
+    roomDialog.setIntRange(kMinimumRoomId, kMaximumRoomId);
+    roomDialog.setIntStep(1);
+    roomDialog.setIntValue(kMinimumRoomId);
+    // The application is dark, while this compact numeric field intentionally
+    // uses a white background.  Force a black value so every room digit stays
+    // legible instead of inheriting the surrounding light text color.
+    roomDialog.setStyleSheet(
+            "QInputDialog QSpinBox, QInputDialog QSpinBox QLineEdit {"
+            "color: #000000; background-color: #ffffff; selection-color: #ffffff;"
+            "selection-background-color: #c92f3b; }");
+    if (roomDialog.exec() != QDialog::Accepted) {
         return;
     }
+    const int roomid = roomDialog.intValue();
     qDebug() << roomid;
     // 发送请求
     STRU_JOINROOM_RQ rq;
@@ -2433,14 +2444,35 @@ void SendThread::takeDesktopStats(quint64 *sentFrames, quint64 *replacedFrames,
 void SendThread::slot_queueLatestFrame(uint socket, char *buf, int nlen,
                                        quint64 generation, bool desktopContent)
 {
-    if (!buf || nlen < 7 * static_cast<int>(sizeof(int))) {
+    const int videoHeaderBytes = 7 * static_cast<int>(sizeof(int));
+    if (!buf || nlen < videoHeaderBytes) {
         delete[] buf;
         return;
+    }
+
+    const bool stopFrame = nlen == videoHeaderBytes;
+    bool keyFrame = false;
+    if (!stopFrame && nlen >= videoHeaderBytes + static_cast<int>(sizeof(H264PayloadHeader))) {
+        H264PayloadHeader header = {};
+        memcpy(&header, buf + videoHeaderBytes, sizeof(header));
+        keyFrame = header.magic == H264_PAYLOAD_MAGIC
+                && header.version == H264_PAYLOAD_VERSION
+                && (header.flags & H264_PAYLOAD_FLAG_KEYFRAME);
     }
 
     bool scheduleSend = false;
     {
         std::lock_guard<std::mutex> lock(m_pendingMutex);
+        // Delta frames can be replaced to keep latency low, but never replace
+        // a waiting key frame.  Doing so leaves a newly joined viewer with an
+        // endless sequence of P-frames and no point from which to decode.
+        if (m_pendingFrame.buffer && m_pendingFrame.keyFrame && !keyFrame && !stopFrame) {
+            if (desktopContent) {
+                m_desktopReplacedFrames.fetch_add(1);
+            }
+            delete[] buf;
+            return;
+        }
         if (m_pendingFrame.buffer) {
             if (m_pendingFrame.desktopContent) {
                 m_desktopReplacedFrames.fetch_add(1);
@@ -2452,6 +2484,8 @@ void SendThread::slot_queueLatestFrame(uint socket, char *buf, int nlen,
         m_pendingFrame.length = nlen;
         m_pendingFrame.generation = generation;
         m_pendingFrame.desktopContent = desktopContent;
+        m_pendingFrame.keyFrame = keyFrame;
+        m_pendingFrame.stopFrame = stopFrame;
         m_pendingFrame.queuedAt = std::chrono::steady_clock::now();
         if (!m_sendScheduled) {
             m_sendScheduled = true;
@@ -2478,7 +2512,12 @@ void SendThread::slot_sendLatestFrame()
     }
 
     const bool isCurrentGeneration = frame.generation == m_activeGeneration.load();
-    const bool isFresh = std::chrono::steady_clock::now() - frame.queuedAt
+    // An IDR frame (and a final stop frame) remains meaningful even after the
+    // short low-latency queue window.  It must leave the client before later
+    // delta frames; otherwise remote viewers can wait forever for a decodable
+    // picture when a high-resolution share briefly blocks the TCP writer.
+    const bool isFresh = frame.keyFrame || frame.stopFrame
+            || std::chrono::steady_clock::now() - frame.queuedAt
             <= kMaximumQueuedVideoAge;
     if (!isCurrentGeneration || !isFresh) {
         if (frame.desktopContent) {

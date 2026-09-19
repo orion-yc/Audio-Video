@@ -38,8 +38,14 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
 {
     H264Encoder encoder;
     H264Decoder decoder;
+    // A receiver that joins an existing room must be able to start from a
+    // later IDR frame.  Do not feed this decoder the initial sequence so the
+    // test catches an encoder that only makes its very first key frame usable.
+    H264Decoder joiningDecoder;
     const int bitRate = desktopContent ? 48000000 : 32000000;
-    for (int frame = 0; frame < 24; ++frame) {
+    bool joiningDecoderStarted = false;
+    bool joiningDecoderProducedImage = false;
+    for (int frame = 0; frame < 130; ++frame) {
         QByteArray encoded;
         bool keyFrame = false;
         QSize encodedSize;
@@ -52,8 +58,18 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
                 && decoded->size() == encodedSize) {
             *backend = encoder.backendName();
         }
+        if (produced && keyFrame && frame > 0) {
+            joiningDecoderStarted = true;
+        }
+        if (produced && joiningDecoderStarted) {
+            QImage joinedImage;
+            if (joiningDecoder.decode(encoded, &joinedImage)
+                    && joinedImage.size() == encodedSize) {
+                joiningDecoderProducedImage = true;
+            }
+        }
     }
-    return !decoded->isNull();
+    return !decoded->isNull() && joiningDecoderStarted && joiningDecoderProducedImage;
 }
 
 double psnr(const QImage &reference, const QImage &decoded)

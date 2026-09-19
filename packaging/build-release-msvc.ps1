@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.1.7',
+    [string]$Version = '1.1.8',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
     [string]$VcpkgRoot = '',

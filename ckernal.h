@@ -55,6 +55,8 @@ private:
         int length = 0;
         quint64 generation = 0;
         bool desktopContent = false;
+        bool keyFrame = false;
+        bool stopFrame = false;
         std::chrono::steady_clock::time_point queuedAt;
     };
 
