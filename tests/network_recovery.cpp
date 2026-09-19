@@ -28,13 +28,10 @@
 #include <QFile>
 #include <QFontDatabase>
 #include <QEventLoop>
+#include <QLabel>
 #include <cstdlib>
 #include "appstyle.h"
-// All dependency headers are already included. Expose only the kernel's state
-// to this integration harness, without changing the production interface.
-#define private public
 #include "ckernal.h"
-#undef private
 
 int main(int argc, char** argv)
 {
@@ -59,31 +56,49 @@ int main(int argc, char** argv)
         if (!ok) std::_Exit(1);
     };
 
+    auto* latency = kernel->m_roomDialog->findChild<LatencyLabel*>();
+    auto* shareStatus = kernel->m_roomDialog->findChild<QLabel*>("lb_deskStatus");
+    check(latency && shareStatus && shareStatus->isHidden(),
+          "sharing status starts hidden behind the latency badge");
+    check(QMetaObject::invokeMethod(latency, "clicked") && !shareStatus->isHidden(),
+          "latency badge reveals sharing status");
+    check(QMetaObject::invokeMethod(latency, "clicked") && shareStatus->isHidden(),
+          "latency badge hides sharing status again");
+
     kernel->m_loggedIn = true;
     kernel->m_userid = 7;
     memset(kernel->m_sessionToken, 'a', 32);
     kernel->m_sessionToken[32] = 0;
     int resets = 0;
     QObject::connect(kernel, &CKernal::SIG_resetVideoEncoder, &app, [&] { ++resets; });
-    check(kernel->ensureAvChannelReady(1),
-          "legacy server registration write enables video without acknowledgement");
-    check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
-          && resets == 1, "legacy no-ack channel is immediately ready for frames");
+    check(!kernel->ensureAvChannelReady(1) && kernel->m_avRegistrationPending[1]
+          && !kernel->m_avChannelRegistered[1]
+          && kernel->m_avRegistrationFallbackTimers[1]->isActive(),
+          "video registration waits for acknowledgement before frames are sent");
     STRU_MEDIA_REGISTER_RS response = {};
     response.type = DEF_PACK_VIDEO_REGISTER_RS;
     response.userId = 7;
     memset(response.sessionToken, 'b', 32);
     kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
-    check(kernel->m_avChannelRegistered[1], "old session acknowledgement ignored");
+    check(!kernel->m_avChannelRegistered[1] && kernel->m_avRegistrationPending[1],
+          "old session acknowledgement ignored");
     memcpy(response.sessionToken, kernel->m_sessionToken, SESSION_TOKEN_SIZE);
-    response.result = 1;
-    kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
-    check(!kernel->m_avChannelRegistered[1] && kernel->m_avReconnectTimers[1]->isActive(),
-          "rejected registration schedules retry");
     response.result = 0;
     kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
     check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
-          && resets == 1, "valid optional acknowledgement keeps media enabled");
+          && !kernel->m_avRegistrationFallbackTimers[1]->isActive() && resets == 1,
+          "valid registration acknowledgement enables media and requests an IDR");
+    kernel->m_tcpAV[1]->CloseNet();
+    kernel->m_avChannelRegistered[1].store(false);
+    check(!kernel->ensureAvChannelReady(1) && kernel->m_avRegistrationPending[1],
+          "legacy registration stays pending during its acknowledgement window");
+    kernel->m_avRegistrationFallbackTimers[1]->setInterval(1);
+    kernel->m_avRegistrationFallbackTimers[1]->start();
+    QEventLoop registrationFallback;
+    QTimer::singleShot(50, &registrationFallback, &QEventLoop::quit);
+    registrationFallback.exec();
+    check(kernel->m_avChannelRegistered[1] && resets == 2,
+          "legacy server fallback enables media with a new IDR");
     kernel->resetAuthenticationState();
     check(!kernel->m_avChannelRegistered[1], "reauthentication clears media readiness");
 
@@ -103,6 +118,7 @@ int main(int argc, char** argv)
     joined.m_lResult = join_success;
     joined.m_RoomID = 123456;
     kernel->slot_dealJoinRoomRs(0, reinterpret_cast<char*>(&joined), sizeof(joined));
+    kernel->allowLegacyAvRegistration(1);
     check(kernel->m_roomid == 123456 && kernel->m_avChannelRegistered[1],
           "room rejoin supports legacy servers without media acknowledgement");
     kernel->m_roomDialog->grab().save(QApplication::applicationDirPath() + "/room-status.png");

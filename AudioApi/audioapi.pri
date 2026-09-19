@@ -1,14 +1,12 @@
 QT += multimedia
 
-msvc {
-    VCPKG_ROOT = $$PWD/../third_party/vcpkg/installed/x64-windows
-    INCLUDEPATH += $$VCPKG_ROOT/include
-    LIBS += $$VCPKG_ROOT/lib/speex.lib ole32.lib uuid.lib
-} else {
-    SPEEX_ROOT = E:/perject/Speex-1.2.1-MinGW64/install
-    INCLUDEPATH += $$SPEEX_ROOT/include
-    LIBS += -L$$SPEEX_ROOT/lib -lspeex -lole32 -luuid
+!msvc {
+    error("Audio-Video is built with Qt 6.11.1 MSVC 2022 x64 only.")
 }
+
+VCPKG_ROOT = $$PWD/../third_party/vcpkg/installed/x64-windows
+INCLUDEPATH += $$VCPKG_ROOT/include
+LIBS += $$VCPKG_ROOT/lib/speex.lib ole32.lib uuid.lib
 
 
 HEADERS += \

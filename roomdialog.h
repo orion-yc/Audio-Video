@@ -47,6 +47,7 @@ public slots:
     void slot_setMediaStatus(const QString &text);
 private:
     QLabel* m_mediaStatus = nullptr;
+    bool m_topStatusVisible = false;
 public slots:
 
     void slot_addUser(QWidget* user);
@@ -96,6 +97,7 @@ private:
     void emitDesktopShareScreen();
     void refreshDesktopScreens();
     void setDesktopShareStatusText(const QString &text, const QString &toolTip);
+    void setTopStatusVisible(bool visible);
     void setChatPanelVisible(bool visible);
     void sendChatMessage();
     void updateChatButton();

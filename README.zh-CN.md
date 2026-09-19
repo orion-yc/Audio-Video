@@ -52,37 +52,29 @@ port=8000
 
 ## 从源码构建
 
-项目在 Windows 下使用 qmake 和 MinGW 构建。发布脚本会一并打包应用程序、Qt 运行库、OpenCV 运行库、FFmpeg 运行库和安装程序。
+Audio-Video 只保留一个构建目标：64 位 MSVC。仓库已包含编译和打包客户端所需的 OpenCV、Speex 与 FFmpeg 发布依赖；不会提交编译产物和调试符号。
 
-### 开发环境
+### 本机需要安装的工具链
 
-- Qt 6.11.1，MinGW 64 位套件
-- MinGW 13.1.0，64 位
-- OpenCV 4.13.0，MinGW 版本
-- Speex 1.2.1，MinGW 版本
-- `third_party/ffmpeg-master-latest-win64-lgpl-shared` 中的 FFmpeg LGPL 共享运行库
-- Inno Setup 6，用于生成 Windows 安装包
+- Visual Studio 2026 Community 或更高版本，安装“使用 C++ 的桌面开发”工作负载和 MSVC x64 工具集
+- Qt 6.11.1 MSVC 2022 64 位，默认目录为 `E:\App\Qt\6.11.1\msvc2022_64`；也可以通过 `-QtRoot` 指定
+- 只有生成安装包时才需要 Inno Setup 6
 
-OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi/videoapi.pri) 与 [AudioApi/audioapi.pri](AudioApi/audioapi.pri) 中定义。SDK 安装在其他目录时，请先修改这两个变量。
+Qt 与 Visual Studio 不放入仓库。其余项目专用原生依赖已经提交在 `third_party`：
 
-在 PowerShell 中执行：
+- `third_party\vcpkg\installed\x64-windows`：OpenCV、Speex 的发布版头文件、库和运行 DLL
+- `third_party\ffmpeg-master-latest-win64-lgpl-shared`：客户端所需的 FFmpeg 头文件、导入库和三个运行 DLL
 
-```powershell
-.\packaging\build-release.ps1 -Version 1.1.8
-```
-
-如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
-
-- `Audio-Video-Setup-1.1.8.exe`
-- `Audio-Video-Portable-1.1.8.zip`
-
-在 `dev` 分支构建 MSVC 2022 发布版时，执行：
+克隆项目后，在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.8
+.\packaging\build-release-msvc.ps1 -Version 1.1.10
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.8.exe` 和 `Audio-Video-MSVC-Portable-1.1.8.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+通用入口 `build-release.ps1` 会执行同一套 MSVC 构建。构建成功后只会在 `dist\MSVC` 中生成：
+
+- `Audio-Video-MSVC-Setup-1.1.10.exe`
+- `Audio-Video-MSVC-Portable-1.1.10.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -114,13 +106,15 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.8 桌面共享关键帧与鼠标指针
+## 1.1.10 桌面共享连接确认与状态显示
+
+桌面共享会先等待服务器确认专用视频连接，再发送 H.264；确认后会重置编码器，确保首个发送的画面是可独立解码的关键帧。视频写入失败时，客户端会自动替换失效连接并重新认证。左上角延迟标签可点击，用于显示或隐藏顶部的共享详细状态。
 
 发送端会保留已排队的 H.264 关键帧，直到它真正写入视频通道；后续预测帧仍可替换以降低延迟，
 但不能再覆盖新观看端开始解码所必需的画面。桌面共享默认把鼠标指针合成进画面，观看端无需
 额外设置或提示即可看到鼠标操作。加入房间的房间号输入框使用黑色数字，确保清楚可见。
 
-## 1.1.7 桌面共享自动恢复与连接保护说明
+## 桌面共享自动恢复与连接保护说明
 
 客户端默认直连 `8.163.3.67:8000`。原域名目前经过 Cloudflare 的 HTTP 代理，
 无法转发本项目的原始 TCP 协议；仅在服务端地址变更时修改程序同目录的 `config.ini`。
@@ -139,6 +133,6 @@ tests/          编解码冒烟测试
 
 当前协议为原始 TCP，尚未接入 TLS。完成证书与服务端配套部署前，请只在可信网络或 VPN 中使用，并在服务器防火墙中仅放行已知客户端 IP。
 
-完成 MinGW 构建后，可运行 `tests/run-network-recovery.ps1` 验证客户端注册和
+完成 MSVC 构建后，可运行 `tests/run-network-recovery.ps1` 验证客户端注册和
 登录超时流程。测试使用本机监听端口和 Qt 无界面模式，不连接正式服务器；
 实际两客户端共享屏幕仍需部署后联调。

@@ -44,6 +44,7 @@ constexpr int kMinimumRoomId = 100000;
 constexpr int kMaximumRoomId = 999999;
 constexpr int kRoomRequestTimeoutMs = 8000;
 constexpr int kAvChannelReconnectIntervalMs = 1000;
+constexpr int kLegacyAvRegistrationFallbackMs = 1500;
 constexpr qint64 kDesktopReferencePixelsPerSecond =
         static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
 constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
@@ -205,6 +206,11 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
         m_avReconnectTimers[channel]->setInterval(kAvChannelReconnectIntervalMs);
         connect(m_avReconnectTimers[channel], &QTimer::timeout, this,
                 [this, channel]() { retryAvChannel(channel); });
+        m_avRegistrationFallbackTimers[channel] = new QTimer(this);
+        m_avRegistrationFallbackTimers[channel]->setSingleShot(true);
+        m_avRegistrationFallbackTimers[channel]->setInterval(kLegacyAvRegistrationFallbackMs);
+        connect(m_avRegistrationFallbackTimers[channel], &QTimer::timeout, this,
+                [this, channel]() { allowLegacyAvRegistration(channel); });
     }
     ensureControlConnection();
 
@@ -2016,14 +2022,34 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         connect(m_tcpAV[channel], &INetMediator::SIG_disConnect, this,
                 [this, channel]() {
             m_avChannelRegistered[channel].store(false);
+            m_avRegistrationPending[channel] = false;
+            if (m_avRegistrationFallbackTimers[channel]) {
+                m_avRegistrationFallbackTimers[channel]->stop();
+            }
             QMetaObject::invokeMethod(this, [this, channel]() {
                 scheduleAvChannelRecovery(channel);
             }, Qt::QueuedConnection);
         });
     }
 
+    // Reusing a TCP connection whose server-side association has expired lets
+    // capture and encoding continue while every media write fails. A new
+    // share (or room entry) must therefore get a clean, authenticated socket.
+    if (forceRegistration && m_tcpAV[channel]->IsConnected()) {
+        m_avChannelRegistered[channel].store(false);
+        m_avRegistrationPending[channel] = false;
+        if (m_avRegistrationFallbackTimers[channel]) {
+            m_avRegistrationFallbackTimers[channel]->stop();
+        }
+        m_tcpAV[channel]->CloseNet();
+    }
+
     if (!m_tcpAV[channel]->IsConnected()) {
         m_avChannelRegistered[channel].store(false);
+        m_avRegistrationPending[channel] = false;
+        if (m_avRegistrationFallbackTimers[channel]) {
+            m_avRegistrationFallbackTimers[channel]->stop();
+        }
         m_tcpAV[channel]->CloseNet();
         if (!m_tcpAV[channel]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort)) {
             qWarning() << "Unable to reconnect" << (channel == 0 ? "audio" : "video")
@@ -2036,12 +2062,15 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         return true;
     }
 
+    if (m_avRegistrationPending[channel]) {
+        return false;
+    }
+
     m_avChannelRegistered[channel].store(false);
-    // Legacy servers accept the 44-byte registration request but do not send
-    // an acknowledgement.  A successful TCP write therefore makes this media
-    // channel usable immediately; an optional later acknowledgement can still
-    // revoke it if the server explicitly rejects the request.
-    if (channel == 1) m_roomDialog->slot_setMediaStatus("视频连接中…");
+    // A new server confirms the media association with 10021/10022. Do not
+    // send H.264 before that confirmation: the first IDR could otherwise be
+    // lost, leaving a receiver waiting forever for a decodable frame.
+    if (channel == 1) m_roomDialog->slot_setMediaStatus("视频通道认证中…");
     bool registered = false;
     if (channel == 0) {
         STRU_AUDIO_REGISTER request;
@@ -2065,16 +2094,13 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         return false;
     }
 
-    m_avChannelRegistered[channel].store(true);
-    // Keep accepting a matching optional 10021/10022 response. Older
-    // deployments never send it, and must not be retried just for that.
-    m_avReconnectTimers[channel]->stop();
-    if (channel == 1) {
-        m_mapIDToVideoDecoder.clear();
-        Q_EMIT SIG_resetVideoEncoder();
-        m_roomDialog->slot_setMediaStatus("视频已连接，等待画面…");
+    m_avRegistrationPending[channel] = true;
+    // Older deployments did not acknowledge registration. Keep a bounded
+    // fallback for them, but give modern servers time to authenticate first.
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->start();
     }
-    return true;
+    return false;
 }
 
 void CKernal::scheduleAvChannelRecovery(int channel)
@@ -2101,6 +2127,23 @@ void CKernal::retryAvChannel(int channel)
     }
     if (!ensureAvChannelReady(channel)) {
         scheduleAvChannelRecovery(channel);
+    }
+}
+
+void CKernal::allowLegacyAvRegistration(int channel)
+{
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn ||
+            !m_avRegistrationPending[channel] || !m_tcpAV[channel] ||
+            !m_tcpAV[channel]->IsConnected()) {
+        return;
+    }
+    m_avRegistrationPending[channel] = false;
+    m_avChannelRegistered[channel].store(true);
+    m_avReconnectTimers[channel]->stop();
+    if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        Q_EMIT SIG_resetVideoEncoder();
+        m_roomDialog->slot_setMediaStatus("视频已连接（兼容模式）");
     }
 }
 
@@ -2138,7 +2181,9 @@ void CKernal::resetAuthenticationState()
     m_avChannelRegistered[0].store(false);
     m_avChannelRegistered[1].store(false);
     for (int channel = 0; channel < 2; ++channel) {
+        m_avRegistrationPending[channel] = false;
         m_avReconnectTimers[channel]->stop();
+        m_avRegistrationFallbackTimers[channel]->stop();
     }
 }
 
@@ -2202,14 +2247,25 @@ void CKernal::handleMediaRegistration(int channel, const char* buffer, int lengt
     memcpy(&response, buffer, sizeof(response));
     if (response.userId != m_userid ||
             memcmp(response.sessionToken, m_sessionToken, SESSION_TOKEN_SIZE) != 0) return;
+    m_avRegistrationPending[channel] = false;
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->stop();
+    }
     m_avChannelRegistered[channel].store(response.result == 0);
     if (response.result != 0) {
+        if (m_tcpAV[channel]) {
+            m_tcpAV[channel]->CloseNet();
+        }
         if (channel == 1) m_roomDialog->slot_setMediaStatus("视频认证失败，正在重试…");
         scheduleAvChannelRecovery(channel);
         return;
     }
     m_avReconnectTimers[channel]->stop();
     if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        // Encode an IDR only after the server has accepted the new socket. It
+        // guarantees that receivers joining this share can start decoding.
+        Q_EMIT SIG_resetVideoEncoder();
         m_roomDialog->slot_setMediaStatus("视频已连接");
     }
 }
@@ -2271,7 +2327,22 @@ bool CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
     }
     if (!m_tcpAV[1]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[1].store(false);
-        scheduleAvChannelRecovery(1);
+        // SendThread must not manipulate the connection object directly.
+        // Serialize its recovery on the GUI thread and replace the dead
+        // socket, otherwise every later frame is counted as a failed send.
+        QMetaObject::invokeMethod(this, [this]() {
+            m_avRegistrationPending[1] = false;
+            if (m_avRegistrationFallbackTimers[1]) {
+                m_avRegistrationFallbackTimers[1]->stop();
+            }
+            if (m_tcpAV[1]) {
+                m_tcpAV[1]->CloseNet();
+            }
+            if (m_roomDialog) {
+                m_roomDialog->slot_setMediaStatus("视频连接已断开，正在重新认证…");
+            }
+            scheduleAvChannelRecovery(1);
+        }, Qt::QueuedConnection);
         return false;
     }
     return true;

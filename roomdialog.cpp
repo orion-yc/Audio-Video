@@ -58,6 +58,10 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskStatusLabel->setMinimumHeight(28);
     m_deskStatusLabel->setToolTip("桌面共享的实际编码状态");
     ui->horizontalLayout->insertWidget(1, m_deskStatusLabel);
+    setTopStatusVisible(false);
+    connect(m_latencyLabel, &LatencyLabel::clicked, this, [this]() {
+        setTopStatusVisible(!m_topStatusVisible);
+    });
 
     auto *viewScaleLabel = new QLabel("查看", this);
     viewScaleLabel->setMinimumHeight(28);
@@ -570,6 +574,22 @@ void RoomDialog::setDesktopShareStatusText(const QString &text, const QString &t
     }
     m_deskStatusLabel->setText(text);
     m_deskStatusLabel->setToolTip(toolTip);
+}
+
+void RoomDialog::setTopStatusVisible(bool visible)
+{
+    m_topStatusVisible = visible;
+    if (m_mediaStatus) {
+        m_mediaStatus->setVisible(visible);
+    }
+    if (m_deskStatusLabel) {
+        m_deskStatusLabel->setVisible(visible);
+    }
+    if (m_latencyLabel) {
+        m_latencyLabel->setToolTip(visible
+                ? "每 5 秒自动测量到会议服务器的连接延迟；点击隐藏共享状态"
+                : "每 5 秒自动测量到会议服务器的连接延迟；点击显示共享状态");
+    }
 }
 
 UserShow *RoomDialog::userShowForId(int userId) const

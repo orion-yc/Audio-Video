@@ -52,37 +52,29 @@ The server routes room and media packets and does not transcode video. It must f
 
 ## Build From Source
 
-The project is built with qmake and MinGW on Windows. The release script packages the application, Qt runtime, OpenCV runtime, FFmpeg runtime, and installer.
+Audio-Video supports one build target: 64-bit MSVC. The repository includes the release OpenCV, Speex, and FFmpeg files required to compile and package the client. Build output and debug symbols are intentionally not committed.
 
-### Toolchain
+### Required Local Toolchain
 
-- Qt 6.11.1 for MinGW 64-bit
-- MinGW 13.1.0, 64-bit
-- OpenCV 4.13.0 for MinGW
-- Speex 1.2.1 for MinGW
-- FFmpeg shared LGPL runtime in `third_party/ffmpeg-master-latest-win64-lgpl-shared`
-- Inno Setup 6 to produce the Windows installer
+- Visual Studio 2026 Community or newer, with the Desktop development with C++ workload and the MSVC x64 toolset
+- Qt 6.11.1 MSVC 2022 64-bit at `E:\App\Qt\6.11.1\msvc2022_64`, or pass its location with `-QtRoot`
+- Inno Setup 6 only when generating the installer
 
-The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.pri](VideoApi/videoapi.pri) and [AudioApi/audioapi.pri](AudioApi/audioapi.pri). Update those two variables when your SDKs are installed elsewhere.
+Qt and Visual Studio are not stored in this repository. All other project-specific native dependencies are checked in below `third_party`:
 
-Build a release package from PowerShell:
+- `third_party\vcpkg\installed\x64-windows` — release OpenCV and Speex headers, libraries, and runtime DLLs
+- `third_party\ffmpeg-master-latest-win64-lgpl-shared` — FFmpeg headers, import libraries, and the three runtime DLLs required by the client
 
-```powershell
-.\packaging\build-release.ps1 -Version 1.1.8
-```
-
-The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
-
-- `Audio-Video-Setup-1.1.8.exe`
-- `Audio-Video-Portable-1.1.8.zip`
-
-To build the MSVC 2022 release on the `dev` branch, run:
+After cloning, build the release package from PowerShell:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.8
+.\packaging\build-release-msvc.ps1 -Version 1.1.10
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.8.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.8.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+The generic `build-release.ps1` entry point runs the same MSVC build. Successful builds place only these artifacts in `dist\MSVC`:
+
+- `Audio-Video-MSVC-Setup-1.1.10.exe`
+- `Audio-Video-MSVC-Portable-1.1.10.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -114,7 +106,9 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Desktop sharing in 1.1.8
+## Desktop sharing in 1.1.10
+
+Desktop sharing waits for the server to confirm its dedicated video socket before emitting H.264. Once accepted, the client restarts the encoder to guarantee that the first transmitted frame is an IDR frame, so another participant can begin decoding immediately. If a video write fails, the socket is replaced and re-authenticated automatically. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status.
 
 The sender preserves a queued H.264 key frame until it has been written to the
 video channel. Later delta frames may still be replaced to keep latency low,
@@ -123,7 +117,7 @@ decoding. The mouse pointer is composited into shared-desktop pixels by default;
 viewers require no extra setting or notification. The room-number dialog uses
 black digits on its input field for reliable readability.
 
-## Desktop-sharing recovery and connection safeguards in 1.1.7
+## Desktop-sharing recovery and connection safeguards
 
 The default client endpoint is `8.163.3.67:8000`. The previous hostname is
 currently routed through a Cloudflare HTTP proxy and cannot carry this raw TCP
@@ -151,7 +145,7 @@ The current protocol is raw TCP and is not protected by TLS. Until a TLS
 certificate and matching server deployment are introduced, run it only over a
 trusted network or VPN and restrict the server firewall to known client IPs.
 
-After a MinGW release build, run `tests/run-network-recovery.ps1` to exercise
+After an MSVC release build, run `tests/run-network-recovery.ps1` to exercise
 registration and login deadlines against the actual client objects using Qt's
 offscreen platform and a local test listener. It never connects to the configured
 production server. This is not a two-client screen-sharing end-to-end test.

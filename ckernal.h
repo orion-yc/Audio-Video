@@ -183,7 +183,11 @@ public slots:
     void slot_dealVideoChannelData(uint socket, char* buf, int nlen);
 
 
+#ifdef AUDIO_VIDEO_TESTING
+public:
+#else
 private:
+#endif
     enum class RoomRequest
     {
         None,
@@ -220,6 +224,7 @@ private:
     bool ensureAvChannelReady(int channel, bool forceRegistration = false);
     void scheduleAvChannelRecovery(int channel);
     void retryAvChannel(int channel);
+    void allowLegacyAvRegistration(int channel);
     void handleMediaRegistration(int channel, const char* buffer, int length);
     void failLogin();
     QTimer* m_loginDeadline = nullptr;
@@ -284,7 +289,9 @@ private:
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频
     std::atomic_bool                m_avChannelRegistered[2] = { false, false };
+    bool                            m_avRegistrationPending[2] = { false, false };
     QTimer*                         m_avReconnectTimers[2] = { nullptr, nullptr };
+    QTimer*                         m_avRegistrationFallbackTimers[2] = { nullptr, nullptr };
     QTcpSocket*                     m_latencySocket;
     QTimer*                         m_latencyTimer;
     QTimer*                         m_latencyTimeoutTimer;

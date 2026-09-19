@@ -1,18 +1,14 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.1.8',
+    [string]$Version = '1.1.10',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
-    [string]$VcpkgRoot = '',
     [string]$FFmpegRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-if ([string]::IsNullOrWhiteSpace($VcpkgRoot)) {
-    $VcpkgRoot = Join-Path $projectRoot 'third_party\vcpkg'
-}
 if ([string]::IsNullOrWhiteSpace($FFmpegRoot)) {
     $FFmpegRoot = Join-Path $projectRoot 'third_party\ffmpeg-master-latest-win64-lgpl-shared'
 }
@@ -24,9 +20,7 @@ $distDir = Join-Path $distRoot 'MSVC'
 $artifactName = 'Audio-Video-MSVC'
 $stageDir = Join-Path $distDir "$artifactName-$Version"
 $portableZip = Join-Path $distDir "$artifactName-Portable-$Version.zip"
-$installRoot = Join-Path $VcpkgRoot 'installed'
-$vcpkg = Join-Path $VcpkgRoot 'vcpkg.exe'
-$vcpkgInstalled = Join-Path $installRoot 'x64-windows'
+$vcpkgInstalled = Join-Path $projectRoot 'third_party\vcpkg\installed\x64-windows'
 $ffmpegBin = Join-Path $FFmpegRoot 'bin'
 $ffmpegLicense = Join-Path $FFmpegRoot 'LICENSE.txt'
 $cascadeDir = Join-Path $PSScriptRoot 'cascades'
@@ -58,20 +52,20 @@ Assert-Tool $qmake 'MSVC qmake'
 Assert-Tool $windeployqt 'MSVC windeployqt'
 Assert-Tool $VsDevCmd 'Visual Studio developer command script'
 Assert-Tool $ffmpegLicense 'FFmpeg LGPL license'
-Assert-Tool $vcpkg 'vcpkg'
 if (-not $iscc) {
     throw 'Inno Setup 6 was not found. Install JRSoftware.InnoSetup first.'
 }
 
-$env:VCPKG_DOWNLOADS = Join-Path $VcpkgRoot 'downloads'
-$env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $VcpkgRoot 'archives'
-New-Item -ItemType Directory -Force -Path $env:VCPKG_DOWNLOADS, $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
-$vcpkgArgs = @(
-    'install', '--triplet', 'x64-windows', '--x-manifest-root', $projectRoot,
-    '--x-install-root', $installRoot, '--downloads-root', $env:VCPKG_DOWNLOADS
+$requiredBuildDependencies = @(
+    'include\opencv4\opencv2\core.hpp',
+    'lib\opencv_world4.lib',
+    'lib\speex.lib',
+    'bin\opencv_world4.dll',
+    'bin\speex-1.dll'
 )
-& $vcpkg @vcpkgArgs
-if ($LASTEXITCODE -ne 0) { throw 'vcpkg dependency installation failed.' }
+foreach ($relativePath in $requiredBuildDependencies) {
+    Assert-Tool (Join-Path $vcpkgInstalled $relativePath) "bundled dependency $relativePath"
+}
 
 $sourceExe = Join-Path $releaseDir 'Audio-Video.exe'
 $stageExe = Join-Path $stageDir 'Audio-Video.exe'
@@ -142,9 +136,11 @@ $vcRuntimeDlls | Copy-Item -Destination $stageDir
 if (-not (Test-Path -LiteralPath $ffmpegBin -PathType Container)) {
     throw "FFmpeg runtime directory was not found at $ffmpegBin"
 }
-$ffmpegDlls = Get-ChildItem -LiteralPath $ffmpegBin -Filter '*.dll' -File
-if ($ffmpegDlls.Count -lt 3) { throw 'FFmpeg runtime directory does not contain enough DLLs.' }
-$ffmpegDlls | Copy-Item -Destination $stageDir
+$ffmpegRuntimeFiles = @('avcodec-63.dll', 'avutil-61.dll', 'swscale-10.dll')
+foreach ($fileName in $ffmpegRuntimeFiles) {
+    Assert-Tool (Join-Path $ffmpegBin $fileName) "FFmpeg runtime $fileName"
+    Copy-Item -LiteralPath (Join-Path $ffmpegBin $fileName) -Destination $stageDir
+}
 $licenseDir = Join-Path $stageDir 'THIRD_PARTY_LICENSES'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
 Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $licenseDir 'FFmpeg-LGPL-3.0.txt')

@@ -1,31 +1,44 @@
-# Run after the MinGW release build. Uses its actual production object files.
+param(
+    [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
+    [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat'
+)
+
 $ErrorActionPreference = 'Stop'
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$build = Join-Path $project 'build-qt6'
-$output = Join-Path $build 'network-test'
-New-Item -ItemType Directory -Force -Path $output | Out-Null
-$objects = Get-Content -Raw (Join-Path $build 'release/object_script.Audio-Video.Release')
-$objects.Replace('release/main.o', 'network-test/network_recovery.o') |
-    Set-Content -Encoding ascii (Join-Path $output 'objects')
-@'
-include Makefile.Release
-.PHONY: network-test
-network-test:
-	$(CXX) -c $(CXXFLAGS) $(INCPATH) ../tests/network_recovery.cpp -o network-test/network_recovery.o
-	$(LINKER) $(LFLAGS) -o network-test/network_recovery.exe @network-test/objects $(LIBS)
-'@ | Set-Content -Encoding ascii (Join-Path $output 'test.mk')
-$env:PATH = "E:/App/Qt/Tools/mingw1310_64/bin;E:/App/Qt/6.11.1/mingw_64/bin;$project/dist/MinGW/Audio-Video-1.1.8;$env:PATH"
-$env:QT_QPA_PLATFORM = 'offscreen'
-$env:QT_PLUGIN_PATH = 'E:/App/Qt/6.11.1/mingw_64/plugins'
-Push-Location $build
-try {
-    & 'E:/App/Qt/Tools/mingw1310_64/bin/mingw32-make.exe' -f network-test/test.mk network-test
-    if ($LASTEXITCODE -ne 0) { throw 'Network harness compilation failed' }
-    $process = Start-Process -FilePath (Join-Path $output 'network_recovery.exe') -WorkingDirectory $output -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(30000)) {
-        $process.Kill()
-        throw 'Network harness exceeded 30 seconds'
+$build = Join-Path $project 'build-msvc-tests'
+$qmake = Join-Path $QtRoot 'bin\qmake.exe'
+$testProject = Join-Path $PSScriptRoot 'network_recovery.pro'
+$testExecutable = Join-Path $build 'release\network_recovery.exe'
+
+foreach ($path in @($qmake, $VsDevCmd, $testProject)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Required test tool was not found: $path"
     }
-    Get-Content (Join-Path $output 'results.txt')
-    if ($process.ExitCode -ne 0) { throw "Network harness failed: $($process.ExitCode)" }
-} finally { Pop-Location }
+}
+
+New-Item -ItemType Directory -Force -Path $build | Out-Null
+$buildCommand = 'call "{0}" -arch=x64 -host_arch=x64 && cd /d "{1}" && "{2}" "{3}" -spec win32-msvc "CONFIG+=release" && nmake /NOLOGO /f Makefile.Release' -f `
+    $VsDevCmd, $build, $qmake, $testProject
+& cmd.exe /d /c $buildCommand
+if ($LASTEXITCODE -ne 0) { throw 'Network recovery test compilation failed.' }
+
+$runtimePaths = @(
+    (Join-Path $QtRoot 'bin'),
+    (Join-Path $project 'third_party\vcpkg\installed\x64-windows\bin'),
+    (Join-Path $project 'third_party\ffmpeg-master-latest-win64-lgpl-shared\bin')
+)
+$env:PATH = ($runtimePaths -join ';') + ';' + $env:PATH
+$env:QT_QPA_PLATFORM = 'offscreen'
+
+$process = Start-Process -FilePath $testExecutable -WorkingDirectory (Split-Path $testExecutable) `
+    -WindowStyle Hidden -PassThru
+if (-not $process.WaitForExit(30000)) {
+    $process.Kill()
+    throw 'Network recovery test exceeded 30 seconds.'
+}
+
+$results = Join-Path (Split-Path $testExecutable) 'results.txt'
+Get-Content -LiteralPath $results
+if ($process.ExitCode -ne 0) {
+    throw "Network recovery test failed: $($process.ExitCode)"
+}

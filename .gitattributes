@@ -1,0 +1,4 @@
+# Keep prebuilt third-party headers and libraries byte-for-byte identical to
+# their upstream Windows distributions.  This avoids line-ending rewrites of
+# generated headers when the repository is cloned on another platform.
+third_party/** -text -whitespace

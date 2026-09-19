@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "1.1.8"
+#define AppVersion "1.1.10"
 #endif
 
 #ifndef AppVariant
@@ -7,7 +7,7 @@
 #endif
 
 #ifndef AppDistribution
-  #define AppDistribution "MinGW"
+  #define AppDistribution "MSVC"
 #endif
 
 #define AppName "Audio-Video"
