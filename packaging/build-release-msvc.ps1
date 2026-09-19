@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.1.10',
+    [string]$Version = '1.1.11',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
     [string]$FFmpegRoot = ''
@@ -136,7 +136,7 @@ $vcRuntimeDlls | Copy-Item -Destination $stageDir
 if (-not (Test-Path -LiteralPath $ffmpegBin -PathType Container)) {
     throw "FFmpeg runtime directory was not found at $ffmpegBin"
 }
-$ffmpegRuntimeFiles = @('avcodec-63.dll', 'avutil-61.dll', 'swscale-10.dll')
+$ffmpegRuntimeFiles = @('avcodec-63.dll', 'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll')
 foreach ($fileName in $ffmpegRuntimeFiles) {
     Assert-Tool (Join-Path $ffmpegBin $fileName) "FFmpeg runtime $fileName"
     Copy-Item -LiteralPath (Join-Path $ffmpegBin $fileName) -Destination $stageDir
@@ -153,7 +153,7 @@ $requiredFiles = @(
     'libpng16.dll', 'libwebp.dll', 'libwebpdecoder.dll', 'libwebpdemux.dll', 'libwebpmux.dll', 'liblzma.dll',
     'tiff.dll', 'turbojpeg.dll', 'z.dll', 'avcodec-63.dll',
     'vcruntime140.dll', 'vcruntime140_1.dll',
-    'avutil-61.dll', 'swscale-10.dll', 'THIRD_PARTY_NOTICES.txt',
+    'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll', 'THIRD_PARTY_NOTICES.txt',
     'THIRD_PARTY_LICENSES\FFmpeg-LGPL-3.0.txt', 'THIRD_PARTY_LICENSES\OpenCV-4.12.0.txt', 'haarcascade_eye.xml',
     'haarcascade_frontalface_default.xml', 'platforms\qwindows.dll'
 )

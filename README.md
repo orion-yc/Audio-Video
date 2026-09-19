@@ -63,18 +63,18 @@ Audio-Video supports one build target: 64-bit MSVC. The repository includes the 
 Qt and Visual Studio are not stored in this repository. All other project-specific native dependencies are checked in below `third_party`:
 
 - `third_party\vcpkg\installed\x64-windows` — release OpenCV and Speex headers, libraries, and runtime DLLs
-- `third_party\ffmpeg-master-latest-win64-lgpl-shared` — FFmpeg headers, import libraries, and the three runtime DLLs required by the client
+- `third_party\ffmpeg-master-latest-win64-lgpl-shared` — FFmpeg headers, import libraries, and the four runtime DLLs required by the client
 
 After cloning, build the release package from PowerShell:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.10
+.\packaging\build-release-msvc.ps1 -Version 1.1.11
 ```
 
 The generic `build-release.ps1` entry point runs the same MSVC build. Successful builds place only these artifacts in `dist\MSVC`:
 
-- `Audio-Video-MSVC-Setup-1.1.10.exe`
-- `Audio-Video-MSVC-Portable-1.1.10.zip`
+- `Audio-Video-MSVC-Setup-1.1.11.exe`
+- `Audio-Video-MSVC-Portable-1.1.11.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -106,9 +106,9 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Desktop sharing in 1.1.10
+## Desktop sharing and MSVC packaging in 1.1.11
 
-Desktop sharing waits for the server to confirm its dedicated video socket before emitting H.264. Once accepted, the client restarts the encoder to guarantee that the first transmitted frame is an IDR frame, so another participant can begin decoding immediately. If a video write fails, the socket is replaced and re-authenticated automatically. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status.
+Desktop sharing waits for the server to confirm its dedicated video socket before emitting H.264. Once accepted, the client restarts the encoder to guarantee that the first transmitted frame is an IDR frame, so another participant can begin decoding immediately. If a video write fails, the socket is replaced and re-authenticated automatically. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status. The MSVC package also includes `swresample-7.dll`, required by the bundled FFmpeg encoder.
 
 The sender preserves a queued H.264 key frame until it has been written to the
 video channel. Later delta frames may still be replaced to keep latency low,

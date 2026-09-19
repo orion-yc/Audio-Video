@@ -9,7 +9,7 @@ output.
   import libraries, and runtime DLLs for the `x64-windows` MSVC ABI.
 - `ffmpeg-master-latest-win64-lgpl-shared` contains the FFmpeg headers,
   import libraries, and runtime DLLs used by the client: `avcodec-63.dll`,
-  `avutil-61.dll`, and `swscale-10.dll`.
+  `avutil-61.dll`, `swresample-7.dll`, and `swscale-10.dll`.
 
 The checked-in binaries are used only with Qt 6.11.1 MSVC 2022 64-bit. See
 the root README for the required Visual Studio and Qt versions and the build

@@ -55,10 +55,12 @@ ui_*.h
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avcodec-63.dll
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avutil-61.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swresample-7.dll
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swscale-10.dll
 /third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/*
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avcodec-63.dll
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avutil-61.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swresample-7.dll
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swscale-10.dll
 /third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/*
 !/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/avcodec.lib
