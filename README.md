@@ -9,11 +9,11 @@ Audio-Video is a Windows desktop client for small real-time video meetings. It c
 - Create a room or join one with a room number.
 - Register with an optional nickname and avatar; update the profile later from Settings.
 - Share a camera or desktop and switch between them while in a room.
-- H.264 video with NVIDIA NVENC selected first and an OpenH264 software fallback when NVENC is unavailable.
+- H.264 video with NVIDIA NVENC selected first, Windows Media Foundation hardware encoding second, and an OpenH264 software fallback.
 - The viewer automatically focuses the first remote video stream and restores its media subscriptions after a connection drop.
 - Speex voice transport and a built-in connection-latency indicator.
 - Optional Windows WASAPI loopback capture during desktop sharing, with a choice of the default or a specific active playback device; the system stream is mixed into the existing microphone transport.
-- Desktop sharing lets the presenter choose 720p, 1080p, 1440p, or 4K and 15, 30, or 60 fps. It automatically selects a matching H.264 bitrate up to 56 Mbps; camera capture targets 1920 x 1080 at 60 fps. The delivered quality still depends on the source, GPU, CPU, network, and receiving device.
+- Desktop sharing lets the presenter choose 720p, 1080p, 1440p, or 4K and 15, 30, or 60 fps. It automatically selects a matching H.264 bitrate up to 72 Mbps; camera capture targets 1920 x 1080 at 60 fps. The delivered quality still depends on the source, GPU, CPU, network, and receiving device.
 
 ## Requirements
 
@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.5
+.\packaging\build-release.ps1 -Version 1.1.6
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.5.exe`
-- `Audio-Video-Portable-1.1.5.zip`
+- `Audio-Video-Setup-1.1.6.exe`
+- `Audio-Video-Portable-1.1.6.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.5
+.\packaging\build-release-msvc.ps1 -Version 1.1.6
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.5.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.5.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.6.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.6.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -100,7 +100,7 @@ tests/          Focused codec smoke test
 
 ## Media Notes
 
-H.264 is encoded with NVENC when the runtime can open it. If the driver, GPU, or encoder session cannot be used, the client falls back to the bundled OpenH264 encoder without changing the call flow. All participants should use a current client version for H.264 video interoperability.
+H.264 is encoded with NVENC when the runtime can open it. If NVENC cannot be used, the client tries Windows Media Foundation with hardware encoding before falling back to bundled OpenH264. Desktop sharing replaces queued stale frames with the newest frame, so a busy sender preserves responsiveness instead of building delay. The share banner reports real one-second capture, encode, and send FPS plus deliberate frame drops. All participants should use a current client version for H.264 video interoperability.
 
 High capture settings do not guarantee the same image quality in every call. Desktop resolution is constrained by the shared display, source scaling, local encoding capacity, available upload bandwidth, packet loss, and the receiver's decoding capacity. Close GPU-heavy applications and prefer a stable wired connection for the clearest desktop text.
 
@@ -114,7 +114,7 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Connection recovery, endpoint and protocol safeguards in 1.1.5
+## Desktop-sharing performance and connection safeguards in 1.1.6
 
 The default client endpoint is `8.163.3.67:8000`. The previous hostname is
 currently routed through a Cloudflare HTTP proxy and cannot carry this raw TCP

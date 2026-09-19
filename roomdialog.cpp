@@ -291,6 +291,30 @@ void RoomDialog::slot_setDesktopShareStatus(int width, int height, int frameRate
                               "显示的是实际编码分辨率、目标帧率、目标码率和当前 H.264 编码器");
 }
 
+void RoomDialog::slot_setDesktopShareRuntimeStats(int width, int height,
+                                                   int targetFrameRate, int bitRate,
+                                                   const QString &encoderName,
+                                                   int capturedFrames, int encodedFrames,
+                                                   int sentFrames, int droppedFrames)
+{
+    QString encoder = "H.264";
+    if (encoderName == "h264_nvenc") {
+        encoder = "NVENC";
+    } else if (encoderName == "h264_mf") {
+        encoder = "Media Foundation";
+    } else if (encoderName == "libopenh264") {
+        encoder = "OpenH264（软件）";
+    }
+
+    const int megaBits = qMax(1, bitRate / 1000000);
+    setDesktopShareStatusText(
+                QString("共享 %1x%2 | 目标 %3 FPS / %4 Mbps | 实际 采集 %5 编码 %6 发送 %7 FPS | 丢帧 %8 | %9")
+                .arg(width).arg(height).arg(targetFrameRate).arg(megaBits)
+                .arg(capturedFrames).arg(encodedFrames).arg(sentFrames)
+                .arg(droppedFrames).arg(encoder),
+                "实际 FPS 每秒更新：采集为送入编码器的画面数；编码为 H.264 输出数；发送为写入视频连接的帧数；丢帧表示为保持低延迟而替换或放弃的旧画面。");
+}
+
 void RoomDialog::slot_clearDesktopShareStatus()
 {
     setDesktopShareStatusText("共享 未开始", "桌面共享的实际编码状态");

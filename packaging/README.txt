@@ -1,4 +1,4 @@
-Audio-Video 1.1.5
+Audio-Video 1.1.6
 =================
 
 System requirements
@@ -10,12 +10,12 @@ System requirements
 
 Installation
 ------------
-Run Audio-Video-Setup-1.1.5.exe and follow the installer prompts.
+Run Audio-Video-Setup-1.1.6.exe and follow the installer prompts.
 The default installation is per-user and does not require administrator rights.
 
 Portable version
 ----------------
-Extract Audio-Video-Portable-1.1.5.zip, then run Audio-Video.exe.
+Extract Audio-Video-Portable-1.1.6.zip, then run Audio-Video.exe.
 Keep all extracted files and folders together.
 
 Configuration
@@ -28,8 +28,10 @@ port=8000
 
 Notes
 -----
-- Video uses H.264. NVIDIA NVENC is selected first; if it is unavailable, the
-  client automatically uses the bundled OpenH264 software encoder.
+- Video uses H.264. NVIDIA NVENC is selected first; Media Foundation hardware
+  encoding is the second choice, followed by bundled OpenH264 software encoding.
+- Desktop sharing replaces stale queued frames with the newest frame and shows
+  actual capture, encode, and send FPS in the meeting window.
 - Everyone in the room should use an Audio-Video client with H.264 support.
   This version can still receive JPEG video from earlier clients.
 - The server only relays the video payload and needs no H.264 configuration.

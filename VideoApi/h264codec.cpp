@@ -123,9 +123,14 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
         av_opt_set(context->priv_data, "rc_mode", "bitrate", 0);
         av_opt_set(context->priv_data, "allow_skip_frames", "1", 0);
     } else {
+        // h264_mf: force the Windows hardware encoder when NVENC cannot be
+        // opened.  The display-remoting scenario is tuned for sharp desktop
+        // text rather than for camera motion.
         av_opt_set(context->priv_data, "rate_control", "ld_vbr", 0);
-        av_opt_set(context->priv_data, "scenario", "video_conference", 0);
-        av_opt_set(context->priv_data, "hw_encoding", "0", 0);
+        av_opt_set(context->priv_data, "scenario", desktopContent
+                   ? "display_remoting" : "video_conference", 0);
+        av_opt_set_int(context->priv_data, "quality", desktopContent ? 80 : 65, 0);
+        av_opt_set(context->priv_data, "hw_encoding", "1", 0);
     }
 
     const int openResult = avcodec_open2(context, codec, nullptr);
@@ -181,8 +186,11 @@ bool H264Encoder::openForImage(const QImage &image, int frameRate, int bitRate,
 bool H264Encoder::openSoftwareFallback(const QImage &image, int frameRate, int bitRate,
                                        bool desktopContent)
 {
-    return openEncoder("libopenh264", image, frameRate, bitRate, desktopContent)
-            || openEncoder("h264_mf", image, frameRate, bitRate, desktopContent);
+    // Media Foundation can use the Windows hardware video encoder.  Try it
+    // before OpenH264 so a system where FFmpeg was built without NVENC still
+    // has a hardware-accelerated path for high-frame-rate screen sharing.
+    return openEncoder("h264_mf", image, frameRate, bitRate, desktopContent)
+            || openEncoder("libopenh264", image, frameRate, bitRate, desktopContent);
 }
 
 bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,

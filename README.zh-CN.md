@@ -9,11 +9,11 @@ Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项�
 - 创建房间，或通过房间号加入已有房间。
 - 注册时可选填昵称和头像，也可以在“设置”中后续修改。
 - 在房间内使用摄像头或桌面共享，并可在两者之间切换。
-- 使用 H.264 视频编码，优先使用 NVIDIA NVENC；不可用时自动回退到 OpenH264 软件编码。
+- 使用 H.264 视频编码，优先使用 NVIDIA NVENC，其次尝试 Windows Media Foundation 硬件编码，最后回退到 OpenH264 软件编码。
 - 观看端会自动聚焦首个远端视频流；媒体连接断开后会恢复订阅，避免进房后一直没有共享画面。
 - 使用 Speex 进行语音传输，并提供连接延迟显示。
 - 桌面共享时可勾选“系统声音”，并选择跟随 Windows 默认播放设备或指定活动输出设备；系统声音会与麦克风复用现有语音通道发送。
-- 桌面共享可由共享者选择 720p、1080p、1440p、4K，以及 15、30、60 fps；客户端会自动匹配最高 56 Mbps 的 H.264 码率。摄像头采集目标为最高 1920 x 1080、60 fps。实际画质会受到采集源、显卡、CPU、网络和接收端设备的共同影响。
+- 桌面共享可由共享者选择 720p、1080p、1440p、4K，以及 15、30、60 fps；客户端会自动匹配最高 72 Mbps 的 H.264 码率。摄像头采集目标为最高 1920 x 1080、60 fps。实际画质会受到采集源、显卡、CPU、网络和接收端设备的共同影响。
 
 ## 运行要求
 
@@ -68,21 +68,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.5
+.\packaging\build-release.ps1 -Version 1.1.6
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
 
-- `Audio-Video-Setup-1.1.5.exe`
-- `Audio-Video-Portable-1.1.5.zip`
+- `Audio-Video-Setup-1.1.6.exe`
+- `Audio-Video-Portable-1.1.6.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.5
+.\packaging\build-release-msvc.ps1 -Version 1.1.6
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.5.exe` 和 `Audio-Video-MSVC-Portable-1.1.5.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.6.exe` 和 `Audio-Video-MSVC-Portable-1.1.6.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -100,7 +100,7 @@ tests/          编解码冒烟测试
 
 ## 画质说明
 
-客户端会先尝试通过 NVENC 进行 H.264 编码。显卡驱动、GPU 或编码会话不可用时，会自动切换到内置 OpenH264 软件编码，会议流程无需改变。为确保 H.264 视频兼容，建议房间内所有用户使用较新的客户端版本。
+客户端会先尝试通过 NVENC 进行 H.264 编码。NVENC 不可用时，会继续尝试 Windows Media Foundation 硬件编码，最后才回退到内置 OpenH264 软件编码。桌面共享会以最新帧覆盖过期待发帧，避免堆积后越来越卡；共享标题栏会每秒显示实际采集、编码、发送 FPS 和为保持低延迟而丢弃的帧数。为确保 H.264 视频兼容，建议房间内所有用户使用较新的客户端版本。
 
 采集参数较高并不代表每次通话都能得到相同的清晰度。桌面画质还会受到共享屏幕的分辨率、源图缩放、本地编码性能、实际可用上行带宽、丢包率和接收端解码能力影响。共享文字内容时，建议关闭占用 GPU 的程序并使用稳定的有线网络。
 
@@ -114,7 +114,7 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.5 连接恢复、服务地址与协议保护说明
+## 1.1.6 桌面共享流畅度与连接保护说明
 
 客户端默认直连 `8.163.3.67:8000`。原域名目前经过 Cloudflare 的 HTTP 代理，
 无法转发本项目的原始 TCP 协议；仅在服务端地址变更时修改程序同目录的 `config.ini`。

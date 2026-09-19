@@ -47,6 +47,7 @@ constexpr int kAvChannelReconnectIntervalMs = 1000;
 constexpr qint64 kDesktopReferencePixelsPerSecond =
         static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
 constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
+const std::chrono::milliseconds kMaximumQueuedVideoAge(250);
 
 bool isValidRoomId(int roomId)
 {
@@ -133,6 +134,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_desktopHeight(DESKTOP_IMAGE_HEIGHT)
   ,m_desktopFrameRate(DESKTOP_FRAME_RATE)
   ,m_desktopBitRate(DESKTOP_VIDEO_BITRATE)
+  ,m_desktopStatsTimer(new QTimer(this))
   ,m_latencySocket(new QTcpSocket(this))
     ,m_latencyTimer(new QTimer(this))
     ,m_latencyTimeoutTimer(new QTimer(this))
@@ -282,7 +284,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_showRoomMemberProfile);
 
     connect(this, &CKernal::SIG_sendVideoFrame,
-            m_sendVideoThread.get(), &SendThread::slot_threadSendData);
+            m_sendVideoThread.get(), &SendThread::slot_queueLatestFrame,
+            Qt::DirectConnection);
     connect(this, &CKernal::SIG_encodeVideoFrame,
             m_videoEncodeThread.get(), &VideoEncodeThread::slot_encodeFrame);
     connect(this, &CKernal::SIG_resetVideoEncoder,
@@ -291,6 +294,10 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_sendH264Frame);
     connect(m_videoEncodeThread.get(), &VideoEncodeThread::SIG_encodeFinished,
             this, &CKernal::slot_videoEncodeFinished);
+
+    m_desktopStatsTimer->setInterval(1000);
+    connect(m_desktopStatsTimer, &QTimer::timeout,
+            this, &CKernal::slot_updateDesktopShareStats);
 
     m_latencyTimer->setInterval(5000);
     m_latencyTimeoutTimer->setSingleShot(true);
@@ -1247,6 +1254,8 @@ void CKernal::slot_deskOpen()
     }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Desktop;
+    resetDesktopShareStats();
+    m_desktopStatsTimer->start();
     m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
     m_deskRead->start();
 }
@@ -1290,6 +1299,7 @@ void CKernal::slot_setDesktopShareSettings(int width, int height, int frameRate)
     m_deskRead->setCaptureSettings(width, height, frameRate);
 
     if (changed && m_activeVideoSource == VideoSource::Desktop) {
+        resetDesktopShareStats();
         m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
         Q_EMIT SIG_resetVideoEncoder();
     }
@@ -1302,6 +1312,7 @@ void CKernal::slot_setDesktopShareScreen(const QString &screenName)
     }
     m_deskRead->setCaptureScreenName(screenName);
     if (m_activeVideoSource == VideoSource::Desktop) {
+        resetDesktopShareStats();
         m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
         Q_EMIT SIG_resetVideoEncoder();
     }
@@ -1450,6 +1461,7 @@ void CKernal::stopLocalVideo()
     clearUserVideo(m_userid);
     sendVideoStopFrame();
     m_activeVideoSource = VideoSource::None;
+    m_desktopStatsTimer->stop();
 }
 
 #include "QTime"
@@ -1549,7 +1561,8 @@ void CKernal::slot_setFunnyPic(int picid)
     m_videoRead->setFunnyPic(picid);
 }
 
-void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation)
+void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation,
+                                      bool desktopContent)
 {
     ///视频数据帧
     /// 成员描述
@@ -1596,7 +1609,7 @@ void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation)
 //    slot_clientSendData(0, buf, sizeof(int)*7 + len);
 //    delete buf;
     // 替换为发送信号
-    Q_EMIT SIG_sendVideoFrame(0, buf, sizeof(int)*7 + len, generation);
+    Q_EMIT SIG_sendVideoFrame(0, buf, sizeof(int)*7 + len, generation, desktopContent);
 }
 
 void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
@@ -1608,6 +1621,9 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
 
     bool expected = false;
     if (!m_videoEncodeBusy.compare_exchange_strong(expected, true)) {
+        if (desktopContent) {
+            m_desktopEncoderDroppedFrames.fetch_add(1);
+        }
         return;
     }
     Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate, desktopContent,
@@ -1624,6 +1640,7 @@ void CKernal::slot_sendCameraVideoFrame(QImage img)
 void CKernal::slot_sendDesktopVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Desktop) {
+        m_desktopCapturedFrames.fetch_add(1);
         queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate, true);
     }
 }
@@ -1631,10 +1648,15 @@ void CKernal::slot_sendDesktopVideoFrame(QImage img)
 void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
                                  quint64 generation, QString encoderName)
 {
-    if (generation == m_videoStreamGeneration && m_activeVideoSource == VideoSource::Desktop
+    const bool desktopContent = generation == m_videoStreamGeneration
+            && m_activeVideoSource == VideoSource::Desktop;
+    if (desktopContent
             && width >= 2 && height >= 2) {
-        m_roomDialog->slot_setDesktopShareStatus(width, height, m_desktopFrameRate,
-                                                  m_desktopBitRate, encoderName);
+        if (m_desktopEncoderName != encoderName) {
+            m_desktopEncoderName = encoderName;
+            m_roomDialog->slot_setDesktopShareStatus(width, height, m_desktopFrameRate,
+                                                      m_desktopBitRate, encoderName);
+        }
     }
     if (generation != m_videoStreamGeneration || m_roomid == 0 || encoded.isEmpty() ||
             width < 2 || height < 2) {
@@ -1657,12 +1679,53 @@ void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int h
 
     QByteArray payload(reinterpret_cast<const char *>(&header), sizeof(header));
     payload.append(encoded);
-    slot_sendVideoFrameData(payload, generation);
+    if (desktopContent) {
+        m_desktopEncodedFrames.fetch_add(1);
+    }
+    slot_sendVideoFrameData(payload, generation, desktopContent);
 }
 
 void CKernal::slot_videoEncodeFinished()
 {
     m_videoEncodeBusy.store(false);
+}
+
+void CKernal::resetDesktopShareStats()
+{
+    m_desktopCapturedFrames.store(0);
+    m_desktopEncodedFrames.store(0);
+    m_desktopEncoderDroppedFrames.store(0);
+    m_desktopEncoderName.clear();
+    quint64 sent = 0;
+    quint64 replaced = 0;
+    quint64 late = 0;
+    quint64 failed = 0;
+    m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
+}
+
+void CKernal::slot_updateDesktopShareStats()
+{
+    if (m_activeVideoSource != VideoSource::Desktop || !m_roomDialog) {
+        return;
+    }
+
+    quint64 sent = 0;
+    quint64 replaced = 0;
+    quint64 late = 0;
+    quint64 failed = 0;
+    m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
+
+    const quint64 captured = m_desktopCapturedFrames.exchange(0);
+    const quint64 encoded = m_desktopEncodedFrames.exchange(0);
+    const quint64 encoderDropped = m_desktopEncoderDroppedFrames.exchange(0);
+    const quint64 dropped = encoderDropped + replaced + late + failed;
+    m_roomDialog->slot_setDesktopShareRuntimeStats(
+                m_desktopWidth, m_desktopHeight, m_desktopFrameRate,
+                m_desktopBitRate,
+                m_desktopEncoderName.isEmpty() ? QStringLiteral("等待编码器")
+                                                : m_desktopEncoderName,
+                static_cast<int>(captured), static_cast<int>(encoded),
+                static_cast<int>(sent), static_cast<int>(dropped));
 }
 
 void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
@@ -2136,15 +2199,17 @@ void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
     }
 }
 
-void CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
+bool CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
 {
     if (!ensureAvChannelReady(1)) {
-        return;
+        return false;
     }
     if (!m_tcpAV[1]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[1].store(false);
         scheduleAvChannelRecovery(1);
+        return false;
     }
+    return true;
 }
 
 // 登录提交
@@ -2265,38 +2330,116 @@ void CKernal::slot_createRoom()
 void SendThread::setActiveGeneration(quint64 generation)
 {
     m_activeGeneration.store(generation);
+
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    if (m_pendingFrame.buffer && m_pendingFrame.generation != generation) {
+        if (m_pendingFrame.desktopContent) {
+            m_desktopReplacedFrames.fetch_add(1);
+        }
+        delete[] m_pendingFrame.buffer;
+        m_pendingFrame = PendingFrame();
+    }
 }
 
-void SendThread::slot_threadSendData(uint socket, char *buf, int nlen,
-                                     quint64 generation)
+SendThread::~SendThread()
 {
-    if (generation != m_activeGeneration.load()) {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    delete[] m_pendingFrame.buffer;
+    m_pendingFrame = PendingFrame();
+}
+
+void SendThread::takeDesktopStats(quint64 *sentFrames, quint64 *replacedFrames,
+                                  quint64 *lateFrames, quint64 *failedFrames)
+{
+    if (sentFrames) {
+        *sentFrames = m_desktopSentFrames.exchange(0);
+    }
+    if (replacedFrames) {
+        *replacedFrames = m_desktopReplacedFrames.exchange(0);
+    }
+    if (lateFrames) {
+        *lateFrames = m_desktopLateFrames.exchange(0);
+    }
+    if (failedFrames) {
+        *failedFrames = m_desktopFailedFrames.exchange(0);
+    }
+}
+
+void SendThread::slot_queueLatestFrame(uint socket, char *buf, int nlen,
+                                       quint64 generation, bool desktopContent)
+{
+    if (!buf || nlen < 7 * static_cast<int>(sizeof(int))) {
         delete[] buf;
         return;
     }
-    //qDebug() <<"slot_threadSendData"<<QThread::currentThreadId();
-    // 判断是否有延迟 丢包
-    char* tmp = buf;
-// 类型
-    tmp += sizeof(int);
-// 用户id
-    tmp += sizeof(int);
-// 房间id
-    tmp += sizeof(int);
-    int hour = *(int*)tmp;
-    tmp += sizeof(int);
-    int min = *(int*)tmp;
-    tmp += sizeof(int);
-    int sec = *(int*)tmp;
-    tmp += sizeof(int);
-    int msec = *(int*)tmp;
-    tmp += sizeof(int);
 
-    QTime tm(hour, min, sec, msec);
+    bool scheduleSend = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        if (m_pendingFrame.buffer) {
+            if (m_pendingFrame.desktopContent) {
+                m_desktopReplacedFrames.fetch_add(1);
+            }
+            delete[] m_pendingFrame.buffer;
+        }
+        m_pendingFrame.socket = socket;
+        m_pendingFrame.buffer = buf;
+        m_pendingFrame.length = nlen;
+        m_pendingFrame.generation = generation;
+        m_pendingFrame.desktopContent = desktopContent;
+        m_pendingFrame.queuedAt = std::chrono::steady_clock::now();
+        if (!m_sendScheduled) {
+            m_sendScheduled = true;
+            scheduleSend = true;
+        }
+    }
 
-    // 延迟超过200ms丢弃包
-    if(tm.msecsTo(QTime::currentTime()) <= 200)
-        CKernal::getInstance()->slot_clientVideoSendData(socket, buf, nlen);
-        // CKernal::getInstance()->slot_clientSendData(socket, buf, nlen);
-    delete[] buf;
+    if (scheduleSend) {
+        QMetaObject::invokeMethod(this, "slot_sendLatestFrame", Qt::QueuedConnection);
+    }
+}
+
+void SendThread::slot_sendLatestFrame()
+{
+    PendingFrame frame;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        if (!m_pendingFrame.buffer) {
+            m_sendScheduled = false;
+            return;
+        }
+        frame = m_pendingFrame;
+        m_pendingFrame = PendingFrame();
+    }
+
+    const bool isCurrentGeneration = frame.generation == m_activeGeneration.load();
+    const bool isFresh = std::chrono::steady_clock::now() - frame.queuedAt
+            <= kMaximumQueuedVideoAge;
+    if (!isCurrentGeneration || !isFresh) {
+        if (frame.desktopContent) {
+            m_desktopLateFrames.fetch_add(1);
+        }
+    } else if (CKernal::getInstance()->slot_clientVideoSendData(frame.socket,
+                                                                  frame.buffer,
+                                                                  frame.length)) {
+        if (frame.desktopContent) {
+            m_desktopSentFrames.fetch_add(1);
+        }
+    } else if (frame.desktopContent) {
+        m_desktopFailedFrames.fetch_add(1);
+    }
+    delete[] frame.buffer;
+
+    bool sendNext = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        if (m_pendingFrame.buffer) {
+            sendNext = true;
+        } else {
+            m_sendScheduled = false;
+        }
+    }
+    if (sendNext) {
+        QMetaObject::invokeMethod(this, "slot_sendLatestFrame", Qt::QueuedConnection);
+    }
 }

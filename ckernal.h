@@ -24,7 +24,9 @@
 #include "video_encode_thread.h"
 #include "workthread.h"
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <mutex>
 class CKernal;
 class UserProfileDialog;
 
@@ -35,12 +37,35 @@ class SendThread: public WorkThread
 {
     Q_OBJECT
 public:
+    ~SendThread() override;
     void setActiveGeneration(quint64 generation);
+    void takeDesktopStats(quint64 *sentFrames, quint64 *replacedFrames,
+                          quint64 *lateFrames, quint64 *failedFrames);
 
 public slots:
-    void slot_threadSendData(uint socket, char* buf, int nlen, quint64 generation);
+    // This slot is deliberately invoked directly by the GUI thread.  It only
+    // swaps a pending pointer under a mutex; network I/O stays on this worker.
+    void slot_queueLatestFrame(uint socket, char* buf, int nlen, quint64 generation,
+                               bool desktopContent);
+    void slot_sendLatestFrame();
 private:
+    struct PendingFrame {
+        uint socket = 0;
+        char *buffer = nullptr;
+        int length = 0;
+        quint64 generation = 0;
+        bool desktopContent = false;
+        std::chrono::steady_clock::time_point queuedAt;
+    };
+
     std::atomic<quint64> m_activeGeneration { 0 };
+    std::mutex m_pendingMutex;
+    PendingFrame m_pendingFrame;
+    bool m_sendScheduled = false;
+    std::atomic<quint64> m_desktopSentFrames { 0 };
+    std::atomic<quint64> m_desktopReplacedFrames { 0 };
+    std::atomic<quint64> m_desktopLateFrames { 0 };
+    std::atomic<quint64> m_desktopFailedFrames { 0 };
 };
 
 
@@ -54,7 +79,8 @@ private:
     CKernal(const CKernal&) = delete;
     CKernal& operator=(const CKernal&) = delete;
 signals:
-    void SIG_sendVideoFrame(uint socket, char* buf, int nlen, quint64 generation);
+    void SIG_sendVideoFrame(uint socket, char* buf, int nlen, quint64 generation,
+                            bool desktopContent);
     void SIG_encodeVideoFrame(QImage image, int frameRate, int bitRate,
                               bool desktopContent, quint64 generation);
     void SIG_resetVideoEncoder();
@@ -94,7 +120,7 @@ public slots:
     // 音频发送接口
     void slot_clientAudioSendData( uint socket, char* buf, int nlen);
     // 视频发送接口
-    void slot_clientVideoSendData( uint socket, char* buf, int nlen);
+    bool slot_clientVideoSendData( uint socket, char* buf, int nlen);
 
 
     // ui槽函数
@@ -128,12 +154,14 @@ public slots:
     void slot_refleshVideoImage(QImage img);
     void slot_refleshCameraVideoImage(QImage img);
     void slot_refleshDesktopVideoImage(QImage img);
-    void slot_sendVideoFrameData(const QByteArray &ba, quint64 generation);
+    void slot_sendVideoFrameData(const QByteArray &ba, quint64 generation,
+                                 bool desktopContent = false);
     void slot_sendCameraVideoFrame(QImage img);
     void slot_sendDesktopVideoFrame(QImage img);
     void slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
                             quint64 generation, QString encoderName);
     void slot_videoEncodeFinished();
+    void slot_updateDesktopShareStats();
     void slot_refleshUserImage(int id, QImage &img);
 
     void slot_setFunnyPic(int picid);
@@ -242,6 +270,11 @@ private:
     int                              m_desktopHeight;
     int                              m_desktopFrameRate;
     int                              m_desktopBitRate;
+    QString                          m_desktopEncoderName;
+    QTimer*                          m_desktopStatsTimer;
+    std::atomic<quint64>             m_desktopCapturedFrames { 0 };
+    std::atomic<quint64>             m_desktopEncodedFrames { 0 };
+    std::atomic<quint64>             m_desktopEncoderDroppedFrames { 0 };
 
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频
@@ -278,6 +311,7 @@ private:
     int                             m_pendingRoomId;
 
     void updateLatencyDisplay(int latencyMs);
+    void resetDesktopShareStats();
     void queueVideoFrame(const QImage &image, int frameRate, int bitRate,
                          bool desktopContent);
 };

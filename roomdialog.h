@@ -63,6 +63,10 @@ public slots:
     void slot_setDesktopSharePending(int frameRate, int bitRate);
     void slot_setDesktopShareStatus(int width, int height, int frameRate, int bitRate,
                                     const QString &encoderName);
+    void slot_setDesktopShareRuntimeStats(int width, int height, int targetFrameRate,
+                                          int bitRate, const QString &encoderName,
+                                          int capturedFrames, int encodedFrames,
+                                          int sentFrames, int droppedFrames);
     void slot_clearDesktopShareStatus();
     void slot_appendChatMessage(int userId, const QString &name, const QString &message,
                                 bool ownMessage);
