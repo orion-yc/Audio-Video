@@ -103,7 +103,10 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
     context->rc_max_rate = desktopContent
             ? static_cast<int64_t>(bitRate) * 3 / 2 : bitRate;
     context->rc_buffer_size = context->rc_max_rate;
-    context->gop_size = frameRate * 2;
+    // A one-second IDR interval lets a receiver recover quickly after the
+    // relay discards stale video for a slow connection.  It also keeps a
+    // reconnect from showing a frozen desktop for up to two seconds.
+    context->gop_size = frameRate;
     context->max_b_frames = 0;
     context->flags |= AV_CODEC_FLAG_LOW_DELAY;
 

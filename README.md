@@ -68,21 +68,21 @@ The default local paths for OpenCV and Speex are declared in [VideoApi/videoapi.
 Build a release package from PowerShell:
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.6
+.\packaging\build-release.ps1 -Version 1.1.7
 ```
 
 The script accepts `-QtRoot`, `-MinGwRoot`, `-OpenCvRoot`, `-SpeexRoot`, and `-FFmpegRoot` when the defaults do not match the local machine. Successful builds place these artifacts in `dist\MinGW`:
 
-- `Audio-Video-Setup-1.1.6.exe`
-- `Audio-Video-Portable-1.1.6.zip`
+- `Audio-Video-Setup-1.1.7.exe`
+- `Audio-Video-Portable-1.1.7.zip`
 
 To build the MSVC 2022 release on the `dev` branch, run:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.6
+.\packaging\build-release-msvc.ps1 -Version 1.1.7
 ```
 
-This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.6.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.6.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
+This produces `dist\MSVC\Audio-Video-MSVC-Setup-1.1.7.exe` and `dist\MSVC\Audio-Video-MSVC-Portable-1.1.7.zip`. The script installs its MSVC ABI dependencies beneath `third_party\vcpkg` on first use.
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -100,7 +100,7 @@ tests/          Focused codec smoke test
 
 ## Media Notes
 
-H.264 is encoded with NVENC when the runtime can open it. If NVENC cannot be used, the client tries Windows Media Foundation with hardware encoding before falling back to bundled OpenH264. Desktop sharing replaces queued stale frames with the newest frame, so a busy sender preserves responsiveness instead of building delay. The share banner reports real one-second capture, encode, and send FPS plus deliberate frame drops. All participants should use a current client version for H.264 video interoperability.
+H.264 is encoded with NVENC when the runtime can open it. If NVENC cannot be used, the client tries Windows Media Foundation with hardware encoding before falling back to bundled OpenH264. Desktop sharing replaces queued stale frames with the newest frame, so a busy sender preserves responsiveness instead of building delay. The share banner reports real one-second capture, encode, and send FPS plus deliberate frame drops. A stalled capture, encoder, or video channel is recovered automatically, and each new share refreshes video-channel registration. All participants should use a current client version for H.264 video interoperability.
 
 High capture settings do not guarantee the same image quality in every call. Desktop resolution is constrained by the shared display, source scaling, local encoding capacity, available upload bandwidth, packet loss, and the receiver's decoding capacity. Close GPU-heavy applications and prefer a stable wired connection for the clearest desktop text.
 
@@ -114,7 +114,7 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Desktop-sharing performance and connection safeguards in 1.1.6
+## Desktop-sharing recovery and connection safeguards in 1.1.7
 
 The default client endpoint is `8.163.3.67:8000`. The previous hostname is
 currently routed through a Cloudflare HTTP proxy and cannot carry this raw TCP

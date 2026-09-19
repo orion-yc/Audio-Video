@@ -35,6 +35,9 @@ void Desk_Read::pause()
 {
     m_capturing.store(false);
     m_timer->stop();
+    // A queued capture task from a disconnected or recreated display must
+    // not leave the producer permanently marked as busy.
+    m_frameQueued.store(false);
 }
 
 void Desk_Read::setCaptureSettings(int maxWidth, int maxHeight, int frameRate)

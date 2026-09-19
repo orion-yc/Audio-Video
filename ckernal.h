@@ -275,6 +275,9 @@ private:
     std::atomic<quint64>             m_desktopCapturedFrames { 0 };
     std::atomic<quint64>             m_desktopEncodedFrames { 0 };
     std::atomic<quint64>             m_desktopEncoderDroppedFrames { 0 };
+    int                              m_desktopNoCaptureIntervals = 0;
+    int                              m_desktopNoEncodeIntervals = 0;
+    int                              m_desktopNoSendIntervals = 0;
 
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频

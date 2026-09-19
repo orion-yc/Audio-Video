@@ -68,21 +68,21 @@ OpenCV 和 Speex 的默认本地路径分别在 [VideoApi/videoapi.pri](VideoApi
 在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release.ps1 -Version 1.1.6
+.\packaging\build-release.ps1 -Version 1.1.7
 ```
 
 如果本机目录不同，脚本支持传入 `-QtRoot`、`-MinGwRoot`、`-OpenCvRoot`、`-SpeexRoot` 和 `-FFmpegRoot`。构建成功后，`dist\MinGW` 目录会生成：
 
-- `Audio-Video-Setup-1.1.6.exe`
-- `Audio-Video-Portable-1.1.6.zip`
+- `Audio-Video-Setup-1.1.7.exe`
+- `Audio-Video-Portable-1.1.7.zip`
 
 在 `dev` 分支构建 MSVC 2022 发布版时，执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.6
+.\packaging\build-release-msvc.ps1 -Version 1.1.7
 ```
 
-该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.6.exe` 和 `Audio-Video-MSVC-Portable-1.1.6.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
+该脚本会在 `dist\MSVC` 中生成 `Audio-Video-MSVC-Setup-1.1.7.exe` 和 `Audio-Video-MSVC-Portable-1.1.7.zip`。首次执行会将 MSVC ABI 的依赖安装在项目内的 `third_party\vcpkg`。
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -100,7 +100,7 @@ tests/          编解码冒烟测试
 
 ## 画质说明
 
-客户端会先尝试通过 NVENC 进行 H.264 编码。NVENC 不可用时，会继续尝试 Windows Media Foundation 硬件编码，最后才回退到内置 OpenH264 软件编码。桌面共享会以最新帧覆盖过期待发帧，避免堆积后越来越卡；共享标题栏会每秒显示实际采集、编码、发送 FPS 和为保持低延迟而丢弃的帧数。为确保 H.264 视频兼容，建议房间内所有用户使用较新的客户端版本。
+客户端会先尝试通过 NVENC 进行 H.264 编码。NVENC 不可用时，会继续尝试 Windows Media Foundation 硬件编码，最后才回退到内置 OpenH264 软件编码。桌面共享会以最新帧覆盖过期待发帧，避免堆积后越来越卡；共享标题栏会每秒显示实际釆集、编码、发送 FPS 和为保持低延迟而丢弃的帧数。当采集、编码或视频通道停滞时，客户端会自动恢复；每次开启共享也会刷新视频通道注册。为确保 H.264 视频兼容，建议房间内所有用户使用较新的客户端版本。
 
 采集参数较高并不代表每次通话都能得到相同的清晰度。桌面画质还会受到共享屏幕的分辨率、源图缩放、本地编码性能、实际可用上行带宽、丢包率和接收端解码能力影响。共享文字内容时，建议关闭占用 GPU 的程序并使用稳定的有线网络。
 
@@ -114,7 +114,7 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.6 桌面共享流畅度与连接保护说明
+## 1.1.7 桌面共享自动恢复与连接保护说明
 
 客户端默认直连 `8.163.3.67:8000`。原域名目前经过 Cloudflare 的 HTTP 代理，
 无法转发本项目的原始 TCP 协议；仅在服务端地址变更时修改程序同目录的 `config.ini`。

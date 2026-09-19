@@ -48,6 +48,7 @@ constexpr qint64 kDesktopReferencePixelsPerSecond =
         static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
 constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
 const std::chrono::milliseconds kMaximumQueuedVideoAge(250);
+constexpr int kDesktopStallIntervalsBeforeRecovery = 5;
 
 bool isValidRoomId(int roomId)
 {
@@ -1120,6 +1121,18 @@ void CKernal::slot_quitRoom()
         m_demoDialog->showNormal();
         return;
     }
+
+    // Stop on the video channel while the current room id is still valid.
+    // Resetting the room id first used to suppress the final stop frame and
+    // could leave the next room with a stale local sharing state.
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        m_deskRead->pause();
+        stopLocalVideo();
+    } else if (m_activeVideoSource == VideoSource::Camera) {
+        m_videoRead->pause();
+        stopLocalVideo();
+    }
+
     // 发包
     STRU_LEAVEROOM_RQ rq;
     rq.m_nUserId = m_userid;
@@ -1248,9 +1261,20 @@ void CKernal::slot_deskOpen()
     if (m_activeVideoSource == VideoSource::Desktop) {
         return;
     }
+    if (m_roomid == 0) {
+        m_roomDialog->slot_setMediaStatus("请先加入房间后再共享桌面");
+        return;
+    }
     if (m_activeVideoSource == VideoSource::Camera) {
         m_videoRead->pause();
         stopLocalVideo();
+    }
+    // Refresh the server-side video-socket association for every new share.
+    // This repairs a channel which remained TCP-connected but lost its media
+    // registration after a prior room leave or a server-side queue reset.
+    if (!ensureAvChannelReady(1, true)) {
+        m_roomDialog->slot_setMediaStatus("视频通道重连中，桌面共享将自动恢复…");
+        scheduleAvChannelRecovery(1);
     }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Desktop;
@@ -1696,6 +1720,9 @@ void CKernal::resetDesktopShareStats()
     m_desktopEncodedFrames.store(0);
     m_desktopEncoderDroppedFrames.store(0);
     m_desktopEncoderName.clear();
+    m_desktopNoCaptureIntervals = 0;
+    m_desktopNoEncodeIntervals = 0;
+    m_desktopNoSendIntervals = 0;
     quint64 sent = 0;
     quint64 replaced = 0;
     quint64 late = 0;
@@ -1726,6 +1753,44 @@ void CKernal::slot_updateDesktopShareStats()
                                                 : m_desktopEncoderName,
                 static_cast<int>(captured), static_cast<int>(encoded),
                 static_cast<int>(sent), static_cast<int>(dropped));
+
+    if (captured == 0) {
+        ++m_desktopNoCaptureIntervals;
+    } else {
+        m_desktopNoCaptureIntervals = 0;
+    }
+    if (captured > 0 && encoded == 0) {
+        ++m_desktopNoEncodeIntervals;
+    } else {
+        m_desktopNoEncodeIntervals = 0;
+    }
+    if (encoded > 0 && sent == 0) {
+        ++m_desktopNoSendIntervals;
+    } else {
+        m_desktopNoSendIntervals = 0;
+    }
+
+    if (m_desktopNoCaptureIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoCaptureIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("桌面采集停滞，正在自动恢复…");
+        m_deskRead->pause();
+        m_deskRead->start();
+        Q_EMIT SIG_resetVideoEncoder();
+    } else if (m_desktopNoEncodeIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoEncodeIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("桌面编码停滞，正在自动恢复…");
+        Q_EMIT SIG_resetVideoEncoder();
+    } else if (m_desktopNoSendIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoSendIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("视频通道停滞，正在重新连接…");
+        m_avChannelRegistered[1].store(false);
+        if (m_tcpAV[1]) {
+            m_tcpAV[1]->CloseNet();
+        }
+        if (!ensureAvChannelReady(1, true)) {
+            scheduleAvChannelRecovery(1);
+        }
+    }
 }
 
 void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
