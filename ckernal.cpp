@@ -1995,6 +1995,71 @@ void CKernal::ensureAvConnections(bool forceRegistration)
     }
 }
 
+void CKernal::createAvChannel(int channel)
+{
+    if (channel < 0 || channel > 1 || m_tcpAV[channel]) {
+        return;
+    }
+
+    // TcpClient receives on a native worker thread. Keep all state changes
+    // and UI work on CKernal's thread, and bind callbacks to this exact
+    // connection object. A callback from a replaced socket must never revoke
+    // the authenticated state of its replacement.
+    TcpClientMediator *connection = new TcpClientMediator;
+    m_tcpAV[channel] = connection;
+    connect(connection, &INetMediator::SIG_ReadyData, this,
+            [this, channel, connection](uint socket, char *buffer, int length) {
+        if (m_tcpAV[channel] != connection) {
+            delete[] buffer;
+            return;
+        }
+        if (channel == 0) {
+            slot_dealAudioChannelData(socket, buffer, length);
+        } else {
+            slot_dealVideoChannelData(socket, buffer, length);
+        }
+    }, Qt::QueuedConnection);
+    connect(connection, &INetMediator::SIG_disConnect, this,
+            [this, channel, connection]() {
+        if (m_tcpAV[channel] != connection || m_shuttingDown) {
+            return;
+        }
+        m_avChannelRegistered[channel].store(false);
+        m_avRegistrationPending[channel] = false;
+        if (m_avRegistrationFallbackTimers[channel]) {
+            m_avRegistrationFallbackTimers[channel]->stop();
+        }
+        scheduleAvChannelRecovery(channel);
+    }, Qt::QueuedConnection);
+}
+
+void CKernal::discardAvChannel(int channel)
+{
+    if (channel < 0 || channel > 1) {
+        return;
+    }
+
+    m_avChannelRegistered[channel].store(false);
+    m_avRegistrationPending[channel] = false;
+    if (m_avReconnectTimers[channel]) {
+        m_avReconnectTimers[channel]->stop();
+    }
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->stop();
+    }
+
+    // Clear the active pointer before closing the socket. Any queued packet
+    // or disconnect notification from this retired connection is then
+    // recognized as stale by the callbacks installed in createAvChannel().
+    TcpClientMediator *connection = m_tcpAV[channel];
+    m_tcpAV[channel] = nullptr;
+    if (connection) {
+        disconnect(connection, nullptr, this, nullptr);
+        connection->CloseNet();
+        delete connection;
+    }
+}
+
 bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
 {
     if (channel < 0 || channel > 1) return false;
@@ -2010,41 +2075,26 @@ bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
         return false;
     }
 
-    if (!m_tcpAV[channel]) {
-        m_tcpAV[channel] = new TcpClientMediator;
-        if (channel == 0) {
-            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
-        } else {
-            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
-        }
-        connect(m_tcpAV[channel], &INetMediator::SIG_disConnect, this,
-                [this, channel]() {
-            m_avChannelRegistered[channel].store(false);
-            m_avRegistrationPending[channel] = false;
-            if (m_avRegistrationFallbackTimers[channel]) {
-                m_avRegistrationFallbackTimers[channel]->stop();
-            }
-            QMetaObject::invokeMethod(this, [this, channel]() {
-                scheduleAvChannelRecovery(channel);
-            }, Qt::QueuedConnection);
-        });
-    }
-
     // Reusing a TCP connection whose server-side association has expired lets
     // capture and encoding continue while every media write fails. A new
     // share (or room entry) must therefore get a clean, authenticated socket.
-    if (forceRegistration && m_tcpAV[channel]->IsConnected()) {
-        m_avChannelRegistered[channel].store(false);
-        m_avRegistrationPending[channel] = false;
-        if (m_avRegistrationFallbackTimers[channel]) {
-            m_avRegistrationFallbackTimers[channel]->stop();
-        }
-        m_tcpAV[channel]->CloseNet();
+    if (forceRegistration && m_tcpAV[channel]) {
+        discardAvChannel(channel);
     }
 
+    bool createdConnection = false;
+    if (!m_tcpAV[channel]) {
+        createAvChannel(channel);
+        createdConnection = true;
+    }
     if (!m_tcpAV[channel]->IsConnected()) {
+        // A failed/disconnected mediator may still have a native receive
+        // callback in flight. Replace it instead of reconnecting through the
+        // same object so that callback cannot invalidate the new registration.
+        if (!createdConnection) {
+            discardAvChannel(channel);
+            createAvChannel(channel);
+        }
         m_avChannelRegistered[channel].store(false);
         m_avRegistrationPending[channel] = false;
         if (m_avRegistrationFallbackTimers[channel]) {
@@ -2178,12 +2228,8 @@ void CKernal::resetAuthenticationState()
     clearPendingProfileSave();
     m_pendingAvatarUploadData.clear();
     m_avatarUploadPending = false;
-    m_avChannelRegistered[0].store(false);
-    m_avChannelRegistered[1].store(false);
     for (int channel = 0; channel < 2; ++channel) {
-        m_avRegistrationPending[channel] = false;
-        m_avReconnectTimers[channel]->stop();
-        m_avRegistrationFallbackTimers[channel]->stop();
+        discardAvChannel(channel);
     }
 }
 

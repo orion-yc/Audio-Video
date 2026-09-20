@@ -222,6 +222,8 @@ private:
     void ensureControlConnection();
     void ensureAvConnections(bool forceRegistration = false);
     bool ensureAvChannelReady(int channel, bool forceRegistration = false);
+    void createAvChannel(int channel);
+    void discardAvChannel(int channel);
     void scheduleAvChannelRecovery(int channel);
     void retryAvChannel(int channel);
     void allowLegacyAvRegistration(int channel);

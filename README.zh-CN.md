@@ -68,13 +68,13 @@ Qt 与 Visual Studio 不放入仓库。其余项目专用原生依赖已经提�
 克隆项目后，在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.11
+.\packaging\build-release-msvc.ps1 -Version 1.1.12
 ```
 
 通用入口 `build-release.ps1` 会执行同一套 MSVC 构建。构建成功后只会在 `dist\MSVC` 中生成：
 
-- `Audio-Video-MSVC-Setup-1.1.11.exe`
-- `Audio-Video-MSVC-Portable-1.1.11.zip`
+- `Audio-Video-MSVC-Setup-1.1.12.exe`
+- `Audio-Video-MSVC-Portable-1.1.12.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -106,9 +106,9 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.11 桌面共享连接确认与 MSVC 打包
+## 1.1.12 桌面共享通道恢复
 
-桌面共享会先等待服务器确认专用视频连接，再发送 H.264；确认后会重置编码器，确保首个发送的画面是可独立解码的关键帧。视频写入失败时，客户端会自动替换失效连接并重新认证。左上角延迟标签可点击，用于显示或隐藏顶部的共享详细状态。MSVC 安装包也已包含 FFmpeg 编码器依赖的 `swresample-7.dll`。
+每次进入房间、开始新的桌面共享或连接恢复时，客户端都会重新建立专用视频连接。媒体认证回复和断开通知会统一回到界面线程处理，并且严格绑定产生它的连接，已废弃连接的延迟回调不会再让新连接失去认证状态。认证通过后会重置编码器，确保首个发送的画面是可独立解码的关键帧。左上角延迟标签可点击，用于显示或隐藏顶部的共享详细状态。MSVC 安装包也已包含 FFmpeg 编码器依赖的 `swresample-7.dll`。
 
 发送端会保留已排队的 H.264 关键帧，直到它真正写入视频通道；后续预测帧仍可替换以降低延迟，
 但不能再覆盖新观看端开始解码所必需的画面。桌面共享默认把鼠标指针合成进画面，观看端无需

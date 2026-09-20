@@ -84,7 +84,12 @@ int main(int argc, char** argv)
           "old session acknowledgement ignored");
     memcpy(response.sessionToken, kernel->m_sessionToken, SESSION_TOKEN_SIZE);
     response.result = 0;
-    kernel->handleMediaRegistration(1, reinterpret_cast<char*>(&response), sizeof(response));
+    char* queuedResponse = new char[sizeof(response)];
+    memcpy(queuedResponse, &response, sizeof(response));
+    kernel->m_tcpAV[1]->SIG_ReadyData(0, queuedResponse, sizeof(response));
+    check(!kernel->m_avChannelRegistered[1] && kernel->m_avRegistrationPending[1],
+          "media acknowledgement is marshalled to the UI thread");
+    QCoreApplication::processEvents();
     check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
           && !kernel->m_avRegistrationFallbackTimers[1]->isActive() && resets == 1,
           "valid registration acknowledgement enables media and requests an IDR");
