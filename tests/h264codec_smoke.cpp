@@ -45,6 +45,7 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
     const int bitRate = desktopContent ? 48000000 : 32000000;
     bool joiningDecoderStarted = false;
     bool joiningDecoderProducedImage = false;
+    int joiningDecoderKeyFrame = -1;
     for (int frame = 0; frame < 130; ++frame) {
         QByteArray encoded;
         bool keyFrame = false;
@@ -60,6 +61,9 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
         }
         if (produced && keyFrame && frame > 0) {
             joiningDecoderStarted = true;
+            if (joiningDecoderKeyFrame < 0) {
+                joiningDecoderKeyFrame = frame;
+            }
         }
         if (produced && joiningDecoderStarted) {
             QImage joinedImage;
@@ -69,7 +73,8 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
             }
         }
     }
-    return !decoded->isNull() && joiningDecoderStarted && joiningDecoderProducedImage;
+    return !decoded->isNull() && joiningDecoderStarted && joiningDecoderProducedImage
+            && joiningDecoderKeyFrame <= 30;
 }
 
 double psnr(const QImage &reference, const QImage &decoded)

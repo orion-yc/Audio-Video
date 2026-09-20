@@ -48,7 +48,7 @@ For an Internet-facing deployment, follow [deploy/README.md](deploy/README.md). 
 
 ### Server Compatibility
 
-The server routes room and media packets and does not transcode video. It must forward H.264 payloads unchanged, support the current outer length-prefixed TCP framing, and permit media payloads up to 8 MiB for the 4K sharing option. Custom avatars additionally require the avatar request types `10016` through `10019` and session-token validation on the control connection.
+The server routes room and media packets and does not transcode video. It must forward H.264 payloads unchanged, support the current outer length-prefixed TCP framing, and permit media payloads up to 8 MiB for the 4K sharing option. Custom avatars additionally require the avatar request types `10016` through `10019` and session-token validation on the control connection. Current desktop sharing also uses packet `10023` to request a fresh H.264 key frame after a new viewer has registered.
 
 ## Build From Source
 
@@ -68,13 +68,13 @@ Qt and Visual Studio are not stored in this repository. All other project-specif
 After cloning, build the release package from PowerShell:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.12
+.\packaging\build-release-msvc.ps1 -Version 1.1.13
 ```
 
 The generic `build-release.ps1` entry point runs the same MSVC build. Successful builds place only these artifacts in `dist\MSVC`:
 
-- `Audio-Video-MSVC-Setup-1.1.12.exe`
-- `Audio-Video-MSVC-Portable-1.1.12.zip`
+- `Audio-Video-MSVC-Setup-1.1.13.exe`
+- `Audio-Video-MSVC-Portable-1.1.13.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -106,9 +106,9 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Desktop-sharing channel recovery in 1.1.12
+## Desktop-sharing key-frame synchronization in 1.1.13
 
-Desktop sharing now uses a new dedicated video connection for every room entry, new share, and recovery. Media acknowledgements and disconnect notifications are marshalled to the UI thread and tied to the socket that produced them, so a delayed callback from a retired connection cannot stop a newly authenticated share. Once accepted, the client restarts the encoder to guarantee that the first transmitted frame is an IDR frame, so another participant can begin decoding immediately. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status. The MSVC package also includes `swresample-7.dll`, required by the bundled FFmpeg encoder.
+Desktop sharing now uses a new dedicated video connection for every room entry, new share, and recovery. Media acknowledgements and disconnect notifications are marshalled to the UI thread and tied to the socket that produced them, so a delayed callback from a retired connection cannot stop a newly authenticated share. When a peer finishes video registration, the matching server sends packet `10023` to active publishers; they immediately produce a new IDR frame. Desktop NVENC encoding is also capped at the selected transport bitrate instead of allowing an oversized constant-quality key-frame burst. Deploy the matching server revision with this client version. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status.
 
 The sender preserves a queued H.264 key frame until it has been written to the
 video channel. Later delta frames may still be replaced to keep latency low,

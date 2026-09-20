@@ -93,6 +93,16 @@ int main(int argc, char** argv)
     check(kernel->m_avChannelRegistered[1] && !kernel->m_avReconnectTimers[1]->isActive()
           && !kernel->m_avRegistrationFallbackTimers[1]->isActive() && resets == 1,
           "valid registration acknowledgement enables media and requests an IDR");
+    kernel->m_roomid = 123456;
+    kernel->m_activeVideoSource = CKernal::VideoSource::Desktop;
+    STRU_VIDEO_KEYFRAME_RQ keyFrameRequest = {};
+    keyFrameRequest.type = DEF_PACK_VIDEO_KEYFRAME_RQ;
+    keyFrameRequest.roomId = kernel->m_roomid;
+    keyFrameRequest.requesterUserId = 8;
+    kernel->handleVideoKeyFrameRequest(reinterpret_cast<char*>(&keyFrameRequest),
+                                       sizeof(keyFrameRequest));
+    check(resets == 2, "new viewer request emits a fresh desktop IDR");
+    kernel->m_activeVideoSource = CKernal::VideoSource::None;
     kernel->m_tcpAV[1]->CloseNet();
     kernel->m_avChannelRegistered[1].store(false);
     check(!kernel->ensureAvChannelReady(1) && kernel->m_avRegistrationPending[1],
@@ -102,7 +112,7 @@ int main(int argc, char** argv)
     QEventLoop registrationFallback;
     QTimer::singleShot(50, &registrationFallback, &QEventLoop::quit);
     registrationFallback.exec();
-    check(kernel->m_avChannelRegistered[1] && resets == 2,
+    check(kernel->m_avChannelRegistered[1] && resets == 3,
           "legacy server fallback enables media with a new IDR");
     kernel->resetAuthenticationState();
     check(!kernel->m_avChannelRegistered[1], "reauthentication clears media readiness");

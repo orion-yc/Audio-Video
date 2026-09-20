@@ -467,3 +467,15 @@ struct STRU_MEDIA_REGISTER_RS {
 };
 static_assert(sizeof(STRU_MEDIA_REGISTER_RS) == 48, "media acknowledgement layout");
 
+// Sent by the server over an authenticated video socket after another room
+// member has finished registering. Any active publisher in that room resets
+// its encoder so the new viewer receives an independently decodable IDR.
+#define DEF_PACK_VIDEO_KEYFRAME_RQ (DEF_PACK_BASE + 23)
+struct STRU_VIDEO_KEYFRAME_RQ {
+    PackType type;
+    int roomId;
+    int requesterUserId;
+};
+static_assert(sizeof(STRU_VIDEO_KEYFRAME_RQ) == 12,
+              "video key-frame request layout");
+

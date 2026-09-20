@@ -2,6 +2,8 @@
 
 #include <QDebug>
 
+#include <algorithm>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/error.h>
@@ -100,13 +102,16 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
     context->time_base = AVRational{1, frameRate};
     context->framerate = AVRational{frameRate, 1};
     context->bit_rate = bitRate;
-    context->rc_max_rate = desktopContent
-            ? static_cast<int64_t>(bitRate) * 3 / 2 : bitRate;
-    context->rc_buffer_size = context->rc_max_rate;
-    // A one-second IDR interval lets a receiver recover quickly after the
-    // relay discards stale video for a slow connection.  It also keeps a
-    // reconnect from showing a frozen desktop for up to two seconds.
-    context->gop_size = frameRate;
+    // The desktop quality selector is an upper transport budget, not a
+    // constant-quality target. Bound NVENC's bursts so an oversized IDR does
+    // not occupy the TCP writer long enough for every following frame to be
+    // discarded before a receiver can start decoding.
+    context->rc_max_rate = bitRate;
+    context->rc_buffer_size = bitRate;
+    // Desktop capture often delivers fewer frames than its selected target.
+    // Limit its GOP in encoded frames so a new viewer gets a usable IDR within
+    // about a second even when a 60 FPS capture is actually producing 15 FPS.
+    context->gop_size = desktopContent ? std::min(frameRate, 15) : frameRate;
     context->max_b_frames = 0;
     context->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
@@ -116,12 +121,9 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
         // while retaining the low-latency path used by desktop sharing.
         av_opt_set(context->priv_data, "preset", "p5", 0);
         av_opt_set(context->priv_data, "tune", "ll", 0);
-        av_opt_set(context->priv_data, "rc", desktopContent ? "vbr" : "cbr", 0);
+        av_opt_set(context->priv_data, "rc", "cbr", 0);
         av_opt_set(context->priv_data, "zerolatency", "1", 0);
         av_opt_set(context->priv_data, "forced-idr", "1", 0);
-        if (desktopContent) {
-            av_opt_set(context->priv_data, "cq", "18", 0);
-        }
     } else if (isOpenH264(encoderName)) {
         av_opt_set(context->priv_data, "rc_mode", "bitrate", 0);
         av_opt_set(context->priv_data, "allow_skip_frames", "1", 0);

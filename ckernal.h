@@ -228,6 +228,7 @@ private:
     void retryAvChannel(int channel);
     void allowLegacyAvRegistration(int channel);
     void handleMediaRegistration(int channel, const char* buffer, int length);
+    void handleVideoKeyFrameRequest(const char* buffer, int length);
     void failLogin();
     QTimer* m_loginDeadline = nullptr;
     void sendPendingLogin();

@@ -589,6 +589,9 @@ void CKernal::slot_dealVideoChannelData(uint socket, char *buf, int nlen)
     if (type == DEF_PACK_VIDEO_REGISTER_RS) {
         handleMediaRegistration(1, buf, nlen);
         delete[] buf;
+    } else if (type == DEF_PACK_VIDEO_KEYFRAME_RQ) {
+        handleVideoKeyFrameRequest(buf, nlen);
+        delete[] buf;
     } else if (type == DEF_PACK_VIDEO_FRAME && m_avChannelRegistered[1].load()) {
         slot_dealData(socket, buf, nlen);
     } else {
@@ -2313,6 +2316,30 @@ void CKernal::handleMediaRegistration(int channel, const char* buffer, int lengt
         // guarantees that receivers joining this share can start decoding.
         Q_EMIT SIG_resetVideoEncoder();
         m_roomDialog->slot_setMediaStatus("视频已连接");
+    }
+}
+
+void CKernal::handleVideoKeyFrameRequest(const char* buffer, int length)
+{
+    if (!buffer || length != static_cast<int>(sizeof(STRU_VIDEO_KEYFRAME_RQ)) ||
+            m_roomid == 0 || m_activeVideoSource == VideoSource::None ||
+            !m_avChannelRegistered[1].load()) {
+        return;
+    }
+
+    STRU_VIDEO_KEYFRAME_RQ request = {};
+    memcpy(&request, buffer, sizeof(request));
+    if (request.type != DEF_PACK_VIDEO_KEYFRAME_RQ || request.roomId != m_roomid ||
+            request.requesterUserId <= 0 || request.requesterUserId == m_userid) {
+        return;
+    }
+
+    // A peer may have joined after this stream's first IDR was relayed. Reset
+    // the encoder so its next captured frame is a self-contained starting
+    // point rather than leaving the peer to decode P-frames indefinitely.
+    Q_EMIT SIG_resetVideoEncoder();
+    if (m_roomDialog) {
+        m_roomDialog->slot_setMediaStatus("正在为新观看端同步画面…");
     }
 }
 
