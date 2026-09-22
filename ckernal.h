@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QThread>
 #include <logindialog.h>
 #include <demodialog.h>
 #include "TcpClientMediator.h"
@@ -22,6 +23,7 @@
 #include "desk_read.h"
 #include "h264codec.h"
 #include "video_encode_thread.h"
+#include "video_decode_worker.h"
 #include "workthread.h"
 #include <atomic>
 #include <chrono>
@@ -163,6 +165,8 @@ public slots:
     void slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
                             quint64 generation, QString encoderName);
     void slot_videoEncodeFinished();
+    void slot_videoFrameDecoded(int userId, int roomId, quint64 generation,
+                                QImage image, bool decoded);
     void slot_updateDesktopShareStats();
     void slot_refleshUserImage(int id, QImage &img);
 
@@ -261,6 +265,8 @@ private:
     UserProfileDialog*              m_userProfileDialog;
     // 每个用户视频的显示
     std::map<int, UserShow*>        m_mapIDToUserShow;
+    QElapsedTimer                   m_videoUiClock;
+    std::map<int, qint64>           m_thumbnailLastPaintMs;
 
     // 音频
     Audio_Read*                     m_audioRead = nullptr;
@@ -272,8 +278,13 @@ private:
 
     QSharedPointer<SendThread>      m_sendVideoThread;
     QSharedPointer<VideoEncodeThread> m_videoEncodeThread;
+    QThread*                         m_videoDecodeThread = nullptr;
+    VideoDecodeWorker*               m_videoDecodeWorker = nullptr;
+    std::atomic<quint64>              m_remoteVideoGeneration { 0 };
     std::map<int, std::unique_ptr<H264Decoder>> m_mapIDToVideoDecoder;
     std::atomic_bool                 m_videoEncodeBusy;
+    std::mutex                       m_pendingDesktopFrameMutex;
+    QImage                           m_pendingDesktopFrame;
     quint64                          m_videoStreamGeneration;
     VideoSource                      m_activeVideoSource;
     int                              m_desktopWidth;

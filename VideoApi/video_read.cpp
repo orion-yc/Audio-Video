@@ -81,13 +81,13 @@ void CameraCaptureWorker::setFunnyPic(int funnyPic)
 
 void CameraCaptureWorker::slot_readMore()
 {
-    Mat frame;
+    cv::Mat frame;
     if (!m_capture.read(frame) || frame.empty()) {
         return;
     }
 
-    cvtColor(frame, frame, cv::COLOR_BGR2RGB);
-    std::vector<Rect> faces;
+    cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+    std::vector<cv::Rect> faces;
     if (m_funnyPic) {
         if (!m_faceDetectionReady) {
             MyFaceDetect::FaceDetectInit();
@@ -111,7 +111,7 @@ void CameraCaptureWorker::slot_readMore()
     }
     if (overlay) {
         QPainter painter(&image);
-        for (const Rect &face : m_vecLastFace) {
+        for (const cv::Rect &face : m_vecLastFace) {
             const int x = face.x + face.width / 2 - overlay->width() / 2 + 20;
             const int y = face.y - overlay->height();
             painter.drawImage(QPoint(x, y), *overlay);

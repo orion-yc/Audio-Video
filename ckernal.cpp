@@ -154,6 +154,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     ,m_pendingRoomId(0)
 {
     memset(m_sessionToken, 0, sizeof(m_sessionToken));
+    m_videoUiClock.start();
     // 设置协议映射关系
     setNetMap();
     initConfig();
@@ -302,6 +303,15 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     connect(m_videoEncodeThread.get(), &VideoEncodeThread::SIG_encodeFinished,
             this, &CKernal::slot_videoEncodeFinished);
 
+    m_videoDecodeThread = new QThread(this);
+    m_videoDecodeWorker = new VideoDecodeWorker;
+    m_videoDecodeWorker->moveToThread(m_videoDecodeThread);
+    connect(m_videoDecodeThread, &QThread::finished,
+            m_videoDecodeWorker, &QObject::deleteLater);
+    connect(m_videoDecodeWorker, &VideoDecodeWorker::SIG_frameDecoded,
+            this, &CKernal::slot_videoFrameDecoded, Qt::QueuedConnection);
+    m_videoDecodeThread->start();
+
     m_desktopStatsTimer->setInterval(1000);
     connect(m_desktopStatsTimer, &QTimer::timeout,
             this, &CKernal::slot_updateDesktopShareStats);
@@ -403,6 +413,15 @@ void CKernal::slot_destroy()
         delete m_deskRead; m_deskRead = NULL;
     }
     m_videoEncodeThread.reset();
+    if (m_videoDecodeThread && m_videoDecodeThread->isRunning()) {
+        if (m_videoDecodeWorker) {
+            QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetAll",
+                                      Qt::BlockingQueuedConnection);
+        }
+        m_videoDecodeThread->quit();
+        m_videoDecodeThread->wait(1000);
+        m_videoDecodeWorker = nullptr;
+    }
 }
 
 void CKernal::slot_measureLatency()
@@ -1030,6 +1049,11 @@ void CKernal::slot_setJoinedRoom(int roomid)
     }
     clearRoomRequest();
     m_roomid = roomid;
+    m_remoteVideoGeneration.fetch_add(1);
+    if (m_videoDecodeWorker) {
+        QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetAll",
+                                  Qt::QueuedConnection);
+    }
     // 可以写成原界面隐藏 或者按钮失效
     // m_demoDialog->hide();    按键变会代替窗口隐藏
     m_demoDialog->slot_setPushButton_enable(false);
@@ -1150,6 +1174,7 @@ void CKernal::slot_quitRoom()
     slot_clientSendData(0, (char*)&rq, sizeof(rq));
 
     m_roomid = 0;
+    m_remoteVideoGeneration.fetch_add(1);
     m_demoDialog->slot_setPushButton_enable(true);
     // 声音关闭 ui 后台
     m_roomDialog->slot_setRoomClear();
@@ -1489,6 +1514,10 @@ void CKernal::sendVideoStopFrame()
 void CKernal::stopLocalVideo()
 {
     ++m_videoStreamGeneration;
+    {
+        std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+        m_pendingDesktopFrame = QImage();
+    }
     m_sendVideoThread->setActiveGeneration(m_videoStreamGeneration);
     Q_EMIT SIG_resetVideoEncoder();
     clearUserVideo(m_userid);
@@ -1579,12 +1608,22 @@ void CKernal::slot_refleshDesktopVideoImage(QImage img)
 // 用来显示用户
 void CKernal::slot_refleshUserImage(int id ,QImage &img)
 {
+    if (!m_roomDialog || img.isNull()) {
+        return;
+    }
     // 预览图 大图 显示
     m_roomDialog->slot_setBigImage(id, img);
     // 列表显示
     if(m_mapIDToUserShow.count(id) > 0){
-        UserShow* user = m_mapIDToUserShow[id];
-        user->slot_setImage(img);
+        // The stage remains real-time, while thumbnail repaints are bounded
+        // to 15 FPS so six scaled QWidget images cannot monopolize the UI.
+        const qint64 now = m_videoUiClock.elapsed();
+        qint64 &lastPaint = m_thumbnailLastPaintMs[id];
+        if (lastPaint == 0 || now - lastPaint >= 66) {
+            lastPaint = now;
+            UserShow* user = m_mapIDToUserShow[id];
+            user->slot_setImage(img);
+        }
     }
 
 }
@@ -1655,6 +1694,10 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
     bool expected = false;
     if (!m_videoEncodeBusy.compare_exchange_strong(expected, true)) {
         if (desktopContent) {
+            {
+                std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+                m_pendingDesktopFrame = image;
+            }
             m_desktopEncoderDroppedFrames.fetch_add(1);
         }
         return;
@@ -1721,6 +1764,16 @@ void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int h
 void CKernal::slot_videoEncodeFinished()
 {
     m_videoEncodeBusy.store(false);
+
+    QImage pending;
+    {
+        std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+        pending = std::move(m_pendingDesktopFrame);
+    }
+    if (!pending.isNull() && m_activeVideoSource == VideoSource::Desktop &&
+            m_roomid != 0) {
+        queueVideoFrame(pending, m_desktopFrameRate, m_desktopBitRate, true);
+    }
 }
 
 void CKernal::resetDesktopShareStats()
@@ -1849,6 +1902,7 @@ void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
 
 void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
 {
+	Q_UNUSED(socket);
     if (nlen < 7 * static_cast<int>(sizeof(int))) return;
     // 反序列化过程
     int type;
@@ -1862,6 +1916,11 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     char* tmp = buf;
     type = *(int*)tmp;
     tmp += sizeof(int);
+	Q_UNUSED(type);
+	Q_UNUSED(hour);
+	Q_UNUSED(min);
+	Q_UNUSED(sec);
+	Q_UNUSED(msec);
     userid = *(int*)tmp;
     tmp += sizeof(int);
     roomid = *(int*)tmp;
@@ -1876,6 +1935,7 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     tmp += sizeof(int);
 
     const int imageLen = nlen - 7*sizeof(int);
+    const quint64 remoteGeneration = m_remoteVideoGeneration.load();
     if (m_roomid == 0 || roomid != m_roomid) {
         return;
     }
@@ -1885,6 +1945,10 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     if (imageLen == 0) {
         m_mapIDToVideoDecoder.erase(userid);
         clearUserVideo(userid);
+		if (m_videoDecodeWorker) {
+			QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetUser",
+			                          Qt::QueuedConnection, Q_ARG(int, userid));
+		}
         return;
     }
     if (imageLen >= static_cast<int>(sizeof(H264PayloadHeader))) {
@@ -1899,36 +1963,47 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
                 qWarning() << "Discarding malformed H.264 video frame.";
                 return;
             }
-            auto &decoder = m_mapIDToVideoDecoder[userid];
-            if (!decoder) {
-                decoder = std::make_unique<H264Decoder>();
-            }
             const QByteArray encoded(tmp + sizeof(header), encodedLength);
-            QImage decoded;
-            bool decodedFrame = decoder->decode(encoded, &decoded);
-            if (!decodedFrame && (header.flags & H264_PAYLOAD_FLAG_KEYFRAME)) {
-                // A viewer can join mid-stream or reconnect after a decoder
-                // error. A key frame is self-contained, so retry it with a
-                // fresh decoder instead of waiting for a later GOP.
-                decoder = std::make_unique<H264Decoder>();
-                decoded = QImage();
-                decodedFrame = decoder->decode(encoded, &decoded);
-            }
-            if (decodedFrame && !decoded.isNull()) {
-                slot_refleshUserImage(userid, decoded);
-                m_roomDialog->slot_setMediaStatus("正在接收画面");
-            } else {
-                m_roomDialog->slot_setMediaStatus("等待可解码画面…");
-            }
+			if (m_videoDecodeWorker) {
+				QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_decodeH264",
+				                          Qt::QueuedConnection,
+				                          Q_ARG(int, userid), Q_ARG(int, roomid),
+				                          Q_ARG(quint64, remoteGeneration),
+				                          Q_ARG(QByteArray, encoded),
+				                          Q_ARG(int, static_cast<int>(header.flags)));
+			}
             return;
         }
     }
 
     // Clients before the H.264 upgrade send JPEG bytes directly after the frame header.
-    QImage img;
-    img.loadFromData((/*cosnt*/uchar*)tmp, imageLen);
+	if (m_videoDecodeWorker) {
+		const QByteArray encoded(tmp, imageLen);
+		QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_decodeImage",
+		                          Qt::QueuedConnection,
+		                          Q_ARG(int, userid), Q_ARG(int, roomid),
+		                          Q_ARG(quint64, remoteGeneration),
+		                          Q_ARG(QByteArray, encoded));
+	}
+}
 
-    slot_refleshUserImage(userid, img);
+void CKernal::slot_videoFrameDecoded(int userId, int roomId, quint64 generation,
+                                     QImage image, bool decoded)
+{
+	if (m_roomid == 0 || roomId != m_roomid ||
+	        generation != m_remoteVideoGeneration.load()) {
+		return;
+	}
+	if (!decoded || image.isNull()) {
+		if (m_roomDialog) {
+			m_roomDialog->slot_setMediaStatus("等待可解码画面…");
+		}
+		return;
+	}
+	slot_refleshUserImage(userId, image);
+	if (m_roomDialog) {
+		m_roomDialog->slot_setMediaStatus("正在接收画面");
+	}
 }
 
 bool CKernal::hasAuthenticatedControlConnection() const

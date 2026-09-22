@@ -49,6 +49,7 @@ Desk_Read::Desk_Read(QObject *parent) : QObject(parent)
   ,m_maxWidth(DESKTOP_IMAGE_WIDTH)
   ,m_maxHeight(DESKTOP_IMAGE_HEIGHT)
   ,m_frameRate(DESKTOP_FRAME_RATE)
+  ,m_dxgiCapture(std::make_unique<DxgiDesktopCapture>())
 {
     m_deskReadThread->setDeskRead( this);
 
@@ -159,21 +160,25 @@ void Desk_Read::slot_getScreenFrame()
         m_frameQueued.store(false);
         return;
     }
-    QPixmap map = src->grabWindow(0);
-
-    QImage image = map.toImage();
+    QImage image;
+    // DXGI duplication avoids the compositor round-trip and the QPixmap
+    // conversion used by the legacy fallback. It also lets us reuse the last
+    // desktop image when only the cursor moves.
+    if (!m_dxgiCapture->capture(src->name(), &image)) {
+        image = src->grabWindow(0).toImage();
+    }
     const int maxWidth = m_maxWidth.load();
     const int maxHeight = m_maxHeight.load();
     if (image.width() > maxWidth || image.height() > maxHeight) {
         image = image.scaled(maxWidth, maxHeight,
-                             Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                             Qt::KeepAspectRatio, Qt::FastTransformation);
     }
     // QScreen::grabWindow does not include the hardware cursor on Windows.
     // Composite the current pointer into the shared pixels automatically so
     // viewers see mouse operations without any extra UI or notification.
     overlayCursor(&image, src, QPoint(m_cursorX.load(), m_cursorY.load()));
     if (m_capturing.load() && !image.isNull()) {
-        Q_EMIT SIG_screenFrame(image.copy());
+        Q_EMIT SIG_screenFrame(image);
     }
     m_frameQueued.store(false);
 }

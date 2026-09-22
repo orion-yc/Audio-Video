@@ -68,13 +68,13 @@ Qt and Visual Studio are not stored in this repository. All other project-specif
 After cloning, build the release package from PowerShell:
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.13
+.\packaging\build-release-msvc.ps1 -Version 1.1.14
 ```
 
 The generic `build-release.ps1` entry point runs the same MSVC build. Successful builds place only these artifacts in `dist\MSVC`:
 
-- `Audio-Video-MSVC-Setup-1.1.13.exe`
-- `Audio-Video-MSVC-Portable-1.1.13.zip`
+- `Audio-Video-MSVC-Setup-1.1.14.exe`
+- `Audio-Video-MSVC-Portable-1.1.14.zip`
 
 The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro).
 
@@ -106,7 +106,7 @@ Release packages include `THIRD_PARTY_NOTICES.txt` and `THIRD_PARTY_LICENSES/FFm
 
 Please open an issue with the client version, Windows version, server endpoint, reproduction steps, and relevant logs. Keep pull requests focused and avoid committing generated build output from `build-qt6` or `dist`.
 
-## Desktop-sharing key-frame synchronization in 1.1.13
+## Desktop-sharing key-frame synchronization in 1.1.14
 
 Desktop sharing now uses a new dedicated video connection for every room entry, new share, and recovery. Media acknowledgements and disconnect notifications are marshalled to the UI thread and tied to the socket that produced them, so a delayed callback from a retired connection cannot stop a newly authenticated share. When a peer finishes video registration, the matching server sends packet `10023` to active publishers; they immediately produce a new IDR frame. Desktop NVENC encoding is also capped at the selected transport bitrate instead of allowing an oversized constant-quality key-frame burst. Deploy the matching server revision with this client version. Click the latency badge in the upper-left corner to reveal or hide the detailed sharing status.
 

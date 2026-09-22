@@ -68,13 +68,13 @@ Qt 与 Visual Studio 不放入仓库。其余项目专用原生依赖已经提�
 克隆项目后，在 PowerShell 中执行：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 1.1.13
+.\packaging\build-release-msvc.ps1 -Version 1.1.14
 ```
 
 通用入口 `build-release.ps1` 会执行同一套 MSVC 构建。构建成功后只会在 `dist\MSVC` 中生成：
 
-- `Audio-Video-MSVC-Setup-1.1.13.exe`
-- `Audio-Video-MSVC-Portable-1.1.13.zip`
+- `Audio-Video-MSVC-Setup-1.1.14.exe`
+- `Audio-Video-MSVC-Portable-1.1.14.zip`
 
 H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tests/h264codec_smoke.pro)。
 
@@ -106,7 +106,7 @@ tests/          编解码冒烟测试
 
 提交问题时，请说明客户端版本、Windows 版本、服务端地址、复现步骤和相关日志。提交代码时请保持改动聚焦，不要提交 `build-qt6` 或 `dist` 下的生成文件。
 
-## 1.1.13 桌面共享关键帧同步
+## 1.1.14 桌面共享关键帧同步
 
 每次进入房间、开始新的桌面共享或连接恢复时，客户端都会重新建立专用视频连接。媒体认证回复和断开通知会统一回到界面线程处理，并且严格绑定产生它的连接，已废弃连接的延迟回调不会再让新连接失去认证状态。当新的观看端完成视频注册后，配套服务端会向正在共享的客户端发送 `10023` 请求，使其立即生成新的 H.264 IDR 关键帧。桌面 NVENC 编码也会严格受所选传输码率限制，避免超大的恒定质量关键帧堵塞 TCP 发送。使用此版本时必须部署配套的服务端源码。左上角延迟标签可点击，用于显示或隐藏顶部的共享详细状态。
 

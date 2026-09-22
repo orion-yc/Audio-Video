@@ -9,8 +9,10 @@
 #include<QMutex>
 #include<QString>
 #include <atomic>
+#include <memory>
 #include"video_common.h"
 #include"workthread.h"
+#include "dxgi_desktop_capture.h"
 
 class Desk_Read;
 class DeskReadThread: public WorkThread
@@ -58,6 +60,7 @@ private:
     std::atomic_int m_cursorY { 0 };
     mutable QMutex m_captureScreenMutex;
     QString m_captureScreenName;
+    std::unique_ptr<DxgiDesktopCapture> m_dxgiCapture;
 };
 
 // 需要 输出 截屏(qt) -> 信号形式输出
