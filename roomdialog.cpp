@@ -90,7 +90,7 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskResolutionCombo->addItem("1080p", QSize(1920, 1080));
     m_deskResolutionCombo->addItem("1440p", QSize(2560, 1440));
     m_deskResolutionCombo->addItem("4K", QSize(3840, 2160));
-    m_deskResolutionCombo->setCurrentIndex(2);
+    m_deskResolutionCombo->setCurrentIndex(0);
 
     auto *frameRateLabel = new QLabel("FPS", this);
     frameRateLabel->setMinimumHeight(28);
@@ -101,7 +101,7 @@ RoomDialog::RoomDialog(QWidget *parent) :
     m_deskFrameRateCombo->addItem("15 FPS", 15);
     m_deskFrameRateCombo->addItem("30 FPS", 30);
     m_deskFrameRateCombo->addItem("60 FPS", 60);
-    m_deskFrameRateCombo->setCurrentIndex(2);
+    m_deskFrameRateCombo->setCurrentIndex(0);
 
     auto *screenLabel = new QLabel("屏幕", this);
     screenLabel->setMinimumHeight(28);
