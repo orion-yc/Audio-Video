@@ -1721,7 +1721,9 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
         return;
     }
     if (m_useWebRtc && m_webTargetBitrate > 0) bitRate = qMin(bitRate, m_webTargetBitrate);
-    Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate, desktopContent,
+    // QImage is implicitly shared. Passing it by value keeps the worker frame
+    // alive without a full-resolution deep copy on the GUI thread.
+    Q_EMIT SIG_encodeVideoFrame(image, frameRate, bitRate, desktopContent,
                                  m_videoStreamGeneration);
 }
 

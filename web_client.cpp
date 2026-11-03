@@ -50,6 +50,10 @@ void CKernal::setupWebRtc() {
     });
     connect(m_gateway,&GatewayClient::roomJoined,this,[this](const QString &id,const QString &token){
         m_roomRequestTimer->stop();m_webRoomName=id;
+        // Enter the room as soon as the authenticated room/token response
+        // arrives. LiveKit connects on its worker thread and should not keep
+        // the lobby visible while ICE/media setup continues.
+        if(!m_roomid)slot_setJoinedRoom(1);
         RtcSession::Config config;config.gatewayUrl=QUrl(m_liveKitUrl);config.roomId=id;
         config.participantIdentity=QString("user-%1").arg(m_userid);config.participantName=m_name;config.liveKitToken=token;
         if(!m_rtc->start(config)){m_gateway->leaveRoom();clearRoomRequest();m_demoDialog->slot_setPushButton_enable(true);}

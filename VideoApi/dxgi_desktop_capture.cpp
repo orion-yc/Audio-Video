@@ -172,6 +172,15 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
         return false;
     }
 
+    // Desktop Duplication can wake for a pointer-only update. The application
+    // composites the pointer itself after capture, so keep the cached desktop
+    // pixels and avoid a full GPU-to-CPU frame readback in that case.
+    if (frameInfo.LastPresentTime.QuadPart == 0 && !m_lastImage.isNull()) {
+        m_duplication->ReleaseFrame();
+        *image = m_lastImage;
+        return true;
+    }
+
     ComPtr<ID3D11Texture2D> source;
     D3D11_TEXTURE2D_DESC sourceDescription = {};
     bool copied = false;
