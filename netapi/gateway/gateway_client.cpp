@@ -41,7 +41,8 @@ void GatewayClient::request(const QByteArray &method, const QString &path, const
         const auto error = reply->error(); const QString detail = reply->errorString();
         reply->deleteLater();
         if (epoch != m_epoch) return;
-        Q_EMIT latencyMeasured(static_cast<int>(clock->elapsed()));
+        if (operation == "health")
+            Q_EMIT latencyMeasured(static_cast<int>(clock->elapsed()));
         if (status == 401 && authenticated()) { logout(); Q_EMIT sessionExpired(); return; }
         if (status == 404 && operation == "avatar-fetch") { done(status, {}); return; }
         if (status < 200 || status >= 300 || error != QNetworkReply::NoError) {
@@ -83,11 +84,13 @@ void GatewayClient::fetchAvatar(qint64 id) {
     request("GET",QString("/v1/users/%1/avatar").arg(id),{},"avatar-fetch",[this,id,version](int,const QByteArray &data){if(version==m_avatarVersion)Q_EMIT avatarReceived(id,data);});
 }
 void GatewayClient::createRoom() {
-    const quint64 generation=m_roomGeneration;
+    const quint64 generation=++m_roomGeneration;
     request("POST","/v1/rooms","{}","room",[this,generation](int,const QByteArray &data){
         if(generation!=m_roomGeneration)return;
-        const QString id=object(data).value("room_id").toString();
-        if(id.isEmpty()){Q_EMIT failed("room","Invalid room response");return;} joinRoom(id);
+        const auto obj=object(data);const QString id=obj.value("room_id").toString();
+        const QString token=obj.value("token").toString();
+        if(id.isEmpty()||token.isEmpty()){Q_EMIT failed("room","Invalid room response");return;}
+        m_room=id;openChat();Q_EMIT roomJoined(id,token);
     });
 }
 void GatewayClient::joinRoom(const QString &id) {

@@ -1502,6 +1502,9 @@ void CKernal::applyOwnAvatar(const QImage &avatar)
 
 void CKernal::updateOwnRoomAvatar(const QImage &avatar)
 {
+    // The lobby icon is outside the room participant widgets, so update it
+    // here too when the profile/avatar fetch completes.
+    m_demoDialog->slot_setAvatarImage(avatar);
     const auto user = m_mapIDToUserShow.find(m_userid);
     if (user != m_mapIDToUserShow.end()) {
         user->second->slot_setAvatarImage(avatar);
