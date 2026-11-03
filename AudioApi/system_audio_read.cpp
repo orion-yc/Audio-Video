@@ -520,7 +520,8 @@ void SystemAudio_Read::captureLoop(const QString &deviceId)
     const int frameBytes = targetRate == 48000 ? 1920 : kPcmFrameBytes;
     const double sourceStep = static_cast<double>(sourceRate) / targetRate;
 
-    auto appendMonoSamples = [this, &sourceSamples, &pcmBuffer, &sourcePosition, sourceStep]
+    auto appendMonoSamples = [this, &sourceSamples, &pcmBuffer, &sourcePosition, sourceStep,
+                              frameBytes]
             (const std::vector<float> &samples) {
         sourceSamples.insert(sourceSamples.end(), samples.begin(), samples.end());
         while (sourcePosition + 1.0 < static_cast<double>(sourceSamples.size())) {
