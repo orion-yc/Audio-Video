@@ -30,6 +30,8 @@
 #include <memory>
 #include <mutex>
 class CKernal;
+class GatewayClient;
+class RtcSession;
 class UserProfileDialog;
 
 typedef void (CKernal::*PFUN)(uint socket,char* buf,int nlen);
@@ -243,6 +245,26 @@ private:
     void clearPendingProfileSave();
     int desktopShareBitRate(int width, int height, int frameRate) const;
 
+    void setupWebRtc();
+    void webLogin(const QString &phone, const QString &password);
+    void webRegister(const QString &phone, const QString &password, const QString &name,
+                     int icon, const QByteArray &avatar, bool avatarChanged);
+    void webJoinRoom();
+    void removeWebParticipant(int id);
+    bool m_useWebRtc = true;
+    QString m_gatewayUrl = QStringLiteral("https://video.onnotify.top");
+    QString m_liveKitUrl = QStringLiteral("wss://video.onnotify.top");
+    GatewayClient *m_gateway = nullptr;
+    RtcSession *m_rtc = nullptr;
+    QString m_webRoomName;
+    QString m_webRegisterPhone, m_webRegisterPassword, m_webRegisterName;
+    int m_webRegisterIcon = 5;
+    bool m_webRegistrationPending = false;
+    bool m_webAvatarChanged = false;
+    QByteArray m_webAvatar;
+    std::atomic<quint64> m_webSentFrames {0};
+    int m_webTargetBitrate = 0;
+    QElapsedTimer m_webBitrateClock;
     PFUN                            m_netMap[DEF_PACK_COUNT];
     LoginDialog*                    m_loginDialog;
     demoDialog*                     m_demoDialog;

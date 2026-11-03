@@ -27,3 +27,8 @@ SOURCES += \
     $$PWD/net/TcpServer.cpp \
     $$PWD/net/UdpNet.cpp
 
+
+QT += websockets
+HEADERS += $$PWD/gateway/gateway_client.h
+SOURCES += $$PWD/gateway/gateway_client.cpp
+INCLUDEPATH += $$PWD/gateway

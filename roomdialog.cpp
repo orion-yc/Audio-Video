@@ -833,3 +833,11 @@ void RoomDialog::slot_setMediaStatus(const QString &text)
 {
     m_mediaStatus->setText(text);
 }
+
+void RoomDialog::slot_setRoomName(const QString &id)
+{
+    ui->lb_title->setMaximumWidth(300);
+    ui->lb_title->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    ui->lb_title->setText(QStringLiteral("房间[%1]").arg(id));
+    ui->lb_title->setToolTip(id);
+}

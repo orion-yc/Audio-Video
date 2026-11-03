@@ -20,7 +20,6 @@
 #endif
 
 namespace {
-constexpr int kTargetSampleRate = 8000;
 constexpr int kPcmFrameBytes = 640;
 
 #ifdef Q_OS_WIN
@@ -517,7 +516,9 @@ void SystemAudio_Read::captureLoop(const QString &deviceId)
     std::vector<float> sourceSamples;
     QByteArray pcmBuffer;
     double sourcePosition = 0.0;
-    const double sourceStep = static_cast<double>(sourceRate) / kTargetSampleRate;
+    const int targetRate = m_sampleRate.load();
+    const int frameBytes = targetRate == 48000 ? 1920 : kPcmFrameBytes;
+    const double sourceStep = static_cast<double>(sourceRate) / targetRate;
 
     auto appendMonoSamples = [this, &sourceSamples, &pcmBuffer, &sourcePosition, sourceStep]
             (const std::vector<float> &samples) {
@@ -539,9 +540,9 @@ void SystemAudio_Read::captureLoop(const QString &deviceId)
             sourceSamples.erase(sourceSamples.begin(), sourceSamples.begin() + consumed);
             sourcePosition -= consumed;
         }
-        while (pcmBuffer.size() >= kPcmFrameBytes) {
-            const QByteArray frame = pcmBuffer.left(kPcmFrameBytes);
-            pcmBuffer.remove(0, kPcmFrameBytes);
+        while (pcmBuffer.size() >= frameBytes) {
+            const QByteArray frame = pcmBuffer.left(frameBytes);
+            pcmBuffer.remove(0, frameBytes);
             Q_EMIT SIG_audioFrame(frame);
         }
     };

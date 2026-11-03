@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.1.13',
+    [string]$Version = '2.0.0',
     [string]$QtRoot = 'E:\App\Qt\6.11.1\msvc2022_64',
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat',
     [string]$FFmpegRoot = ''
@@ -13,6 +13,10 @@ if ([string]::IsNullOrWhiteSpace($FFmpegRoot)) {
     $FFmpegRoot = Join-Path $projectRoot 'third_party\ffmpeg-master-latest-win64-lgpl-shared'
 }
 
+$livekitRoot = Join-Path $projectRoot 'third_party\livekit-1.13.0\livekit-sdk-windows-x64-1.13.0'
+if (-not (Test-Path -LiteralPath (Join-Path $livekitRoot 'lib\livekit.lib'))) {
+    & (Join-Path $PSScriptRoot 'install-livekit-sdk.ps1')
+}
 $buildDir = Join-Path $projectRoot 'build-msvc'
 $releaseDir = Join-Path $buildDir 'release'
 $distRoot = Join-Path $projectRoot 'dist'
@@ -109,6 +113,11 @@ $vcpkgRuntimeDir = Join-Path $vcpkgInstalled 'bin'
 $vcpkgRuntimeDlls = Get-ChildItem -LiteralPath $vcpkgRuntimeDir -Filter '*.dll' -File
 if ($vcpkgRuntimeDlls.Count -eq 0) { throw 'vcpkg runtime DLLs were not found.' }
 $vcpkgRuntimeDlls | Copy-Item -Destination $stageDir
+foreach ($name in @('livekit.dll', 'livekit_ffi.dll')) {
+    $dll = Join-Path $livekitRoot "bin\$name"
+    Assert-Tool $dll "LiveKit runtime $name"
+    Copy-Item -LiteralPath $dll -Destination $stageDir
+}
 
 $deployCommand = 'call "{0}" -arch=x64 -host_arch=x64 && "{1}" --release --compiler-runtime --no-translations "{2}"' -f `
     $VsDevCmd, $windeployqt, (Join-Path $stageDir 'Audio-Video.exe')
@@ -144,11 +153,12 @@ foreach ($fileName in $ffmpegRuntimeFiles) {
 $licenseDir = Join-Path $stageDir 'THIRD_PARTY_LICENSES'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
 Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $licenseDir 'FFmpeg-LGPL-3.0.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses\LiveKit-Apache-2.0.txt') -Destination (Join-Path $licenseDir 'LiveKit-Apache-2.0.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses\OpenCV-4.12.0.txt') -Destination (Join-Path $licenseDir 'OpenCV-4.12.0.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.txt') -Destination $stageDir
 
 $requiredFiles = @(
-    'Audio-Video.exe', 'config.ini', 'README.txt', 'Qt6Core.dll', 'Qt6Gui.dll',
+    'Audio-Video.exe', 'config.ini', 'README.txt', 'livekit.dll', 'livekit_ffi.dll', 'Qt6WebSockets.dll', 'Qt6Core.dll', 'Qt6Gui.dll',
     'Qt6Widgets.dll', 'Qt6Network.dll', 'Qt6Multimedia.dll', 'msvcp140.dll', 'speex-1.dll', 'jpeg62.dll',
     'libpng16.dll', 'libwebp.dll', 'libwebpdecoder.dll', 'libwebpdemux.dll', 'libwebpmux.dll', 'liblzma.dll',
     'tiff.dll', 'turbojpeg.dll', 'z.dll', 'avcodec-63.dll',

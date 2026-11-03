@@ -24,6 +24,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Network recovery test compilation failed.' }
 
 $runtimePaths = @(
     (Join-Path $QtRoot 'bin'),
+    (Join-Path $project 'third_party\livekit-1.13.0\livekit-sdk-windows-x64-1.13.0\bin'),
     (Join-Path $project 'third_party\vcpkg\installed\x64-windows\bin'),
     (Join-Path $project 'third_party\ffmpeg-master-latest-win64-lgpl-shared\bin')
 )

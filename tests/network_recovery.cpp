@@ -42,6 +42,7 @@ int main(int argc, char** argv)
     QTcpServer server;
     if (!server.listen(QHostAddress::LocalHost)) return 2;
     QSettings config(QApplication::applicationDirPath() + "/config.ini", QSettings::IniFormat);
+    config.setValue("Net/transport", "tcp");
     config.setValue("Net/host", "127.0.0.1");
     config.setValue("Net/port", server.serverPort());
     config.sync();

@@ -1,5 +1,7 @@
 #include "ckernal.h"
 #include "userprofiledialog.h"
+#include "gateway_client.h"
+#include "rtc_session.h"
 #include <QDebug>
 #include <QCryptographicHash>
 #include <QMessageBox>
@@ -11,7 +13,7 @@
 // 协议映射关系
 void CKernal::setNetMap()
 {
-    memset( m_netMap, 0, sizeof(PFUN));
+    memset(m_netMap, 0, sizeof(m_netMap));
     // m_netMap[_DEF_PACK_LOGIN_RS - _DEF_PROTOCOL_BASE ] = &CKernal::slot_dealLoginRs;
     NetMap(DEF_PACK_LOGIN_RS)       = &CKernal::slot_dealLoginRs;
     NetMap(DEF_PACK_REGISTER_RS)    = &CKernal::slot_dealRegisterRs;
@@ -118,7 +120,10 @@ void CKernal::initConfig()
         settings.setValue("port", m_serverPort);
         settings.endGroup();
     }
-    qDebug() << m_serverIP << m_serverPort;
+    m_useWebRtc = settings.value("Net/transport", "webrtc").toString() != "tcp";
+    m_gatewayUrl = settings.value("Net/gateway", "https://video.onnotify.top").toString();
+    m_liveKitUrl = settings.value("Net/livekit", "wss://video.onnotify.top").toString();
+    qDebug() << (m_useWebRtc ? m_gatewayUrl : m_serverIP);
 
 
 
@@ -339,6 +344,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_latencyError);
     connect(m_loginTimeoutTimer, &QTimer::timeout,
             this, &CKernal::slot_loginTimeout);
+    if (m_useWebRtc) setupWebRtc();
     m_latencyTimer->start();
     QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
@@ -356,6 +362,8 @@ void CKernal::slot_destroy()
 {
     qDebug() <<  __func__;
     m_shuttingDown = true;
+    if (m_gateway) { m_gateway->leaveRoom(); m_gateway->logout(); }
+    delete m_rtc; m_rtc = nullptr;
     m_avChannelRegistered[0].store(false);
     m_avChannelRegistered[1].store(false);
     m_loginDeadline->stop();
@@ -426,6 +434,7 @@ void CKernal::slot_destroy()
 
 void CKernal::slot_measureLatency()
 {
+    if (m_useWebRtc) { if (m_gateway && m_loggedIn) m_gateway->ping(); return; }
     // Login owns the only server connection until the main control socket has
     // authenticated. Do not let a probe race the login connection.
     if (!m_loggedIn || m_loginPending) {
@@ -1044,7 +1053,7 @@ void CKernal::slot_dealLeaveRoomRq(uint socket, char *buf, int nlen)
 
 void CKernal::slot_setJoinedRoom(int roomid)
 {
-    if (!isValidRoomId(roomid)) {
+    if (!m_useWebRtc && !isValidRoomId(roomid)) {
         return;
     }
     clearRoomRequest();
@@ -1062,6 +1071,7 @@ void CKernal::slot_setJoinedRoom(int roomid)
     // 初始化状态 清空等操作 可以复用
     // todo
     m_roomDialog->slot_setRoomID(roomid);
+    if (m_useWebRtc) m_roomDialog->slot_setRoomName(m_webRoomName);
     const QImage ownAvatar = m_userAvatar.isNull()
             ? builtInAvatar(m_userIconId) : m_userAvatar;
     UserShow *user = nullptr;
@@ -1106,6 +1116,7 @@ void CKernal::slot_userSetCommit(int iconid, QString name, QString feeling,
 
 void CKernal::requestAvatar(int targetUserId)
 {
+    if (m_useWebRtc) { if (targetUserId > 0 && m_gateway->authenticated()) m_gateway->fetchAvatar(targetUserId); return; }
     if (targetUserId <= 0 || !hasAuthenticatedControlConnection() ||
             !hasValidSessionToken(m_sessionToken)) {
         return;
@@ -1120,6 +1131,7 @@ void CKernal::requestAvatar(int targetUserId)
 
 bool CKernal::sendAvatarUpload(const QByteArray &avatarData)
 {
+    if (m_useWebRtc) { m_gateway->uploadAvatar(avatarData); return m_gateway->authenticated(); }
     if (!hasAuthenticatedControlConnection() || !hasValidSessionToken(m_sessionToken) ||
             avatarData.size() > DEF_AVATAR_IMAGE_MAX_SIZE ||
             (!avatarData.isEmpty() && !hasJpegSignature(avatarData))) {
@@ -1171,7 +1183,8 @@ void CKernal::slot_quitRoom()
     rq.m_nUserId = m_userid;
     rq.m_RoomId = m_roomid;
 
-    slot_clientSendData(0, (char*)&rq, sizeof(rq));
+    if (m_useWebRtc) { m_gateway->leaveRoom(); m_rtc->stop(); m_webRoomName.clear(); }
+    else slot_clientSendData(0, (char*)&rq, sizeof(rq));
 
     m_roomid = 0;
     m_remoteVideoGeneration.fetch_add(1);
@@ -1378,6 +1391,7 @@ void CKernal::slot_setDesktopShareScreen(const QString &screenName)
 
 void CKernal::slot_sendRoomChatMessage(const QString &message)
 {
+    if (m_useWebRtc) { if (m_roomid) m_gateway->sendChat(message); return; }
     if (m_roomid == 0 || !hasAuthenticatedControlConnection()) {
         return;
     }
@@ -1463,7 +1477,7 @@ void CKernal::ensureRemoteParticipant(int userId, const QString &name)
     }
 
     if (m_mapIDToAudioWrite.count(userId) == 0) {
-        m_mapIDToAudioWrite[userId] = new Audio_Write;
+        m_mapIDToAudioWrite[userId] = new Audio_Write(nullptr, m_useWebRtc);
     }
 }
 
@@ -1506,6 +1520,7 @@ void CKernal::clearUserVideo(int userId)
 
 void CKernal::sendVideoStopFrame()
 {
+    if (m_useWebRtc) { m_rtc->stopVideo(); return; }
     if (m_roomid != 0) {
         slot_sendVideoFrameData(QByteArray(), m_videoStreamGeneration);
     }
@@ -1687,7 +1702,7 @@ void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation,
 void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
                               bool desktopContent)
 {
-    if (m_roomid == 0 || image.isNull()) {
+    if (m_roomid == 0 || image.isNull() || (m_useWebRtc && !m_rtc->canAcceptVideo())) {
         return;
     }
 
@@ -1702,6 +1717,7 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
         }
         return;
     }
+    if (m_useWebRtc && m_webTargetBitrate > 0) bitRate = qMin(bitRate, m_webTargetBitrate);
     Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate, desktopContent,
                                  m_videoStreamGeneration);
 }
@@ -1745,6 +1761,13 @@ void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int h
         return;
     }
 
+    if (m_useWebRtc) {
+        if (desktopContent) m_desktopEncodedFrames.fetch_add(1);
+        m_rtc->publishH264(encoded, flags & H264_PAYLOAD_FLAG_KEYFRAME, width, height,
+                          desktopContent ? m_desktopFrameRate : CAMERA_FRAME_RATE,
+                          desktopContent ? m_desktopBitRate : CAMERA_VIDEO_BITRATE, desktopContent);
+        return;
+    }
     H264PayloadHeader header = {};
     header.magic = H264_PAYLOAD_MAGIC;
     header.version = H264_PAYLOAD_VERSION;
@@ -1790,6 +1813,7 @@ void CKernal::resetDesktopShareStats()
     quint64 late = 0;
     quint64 failed = 0;
     m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
+    if (m_useWebRtc) sent = m_webSentFrames.exchange(0);
 }
 
 void CKernal::slot_updateDesktopShareStats()
@@ -1810,7 +1834,7 @@ void CKernal::slot_updateDesktopShareStats()
     const quint64 dropped = encoderDropped + replaced + late + failed;
     m_roomDialog->slot_setDesktopShareRuntimeStats(
                 m_desktopWidth, m_desktopHeight, m_desktopFrameRate,
-                m_desktopBitRate,
+                m_useWebRtc && m_webTargetBitrate > 0 ? qMin(m_desktopBitRate, m_webTargetBitrate) : m_desktopBitRate,
                 m_desktopEncoderName.isEmpty() ? QStringLiteral("等待编码器")
                                                 : m_desktopEncoderName,
                 static_cast<int>(captured), static_cast<int>(encoded),
@@ -1845,6 +1869,7 @@ void CKernal::slot_updateDesktopShareStats()
     } else if (m_desktopNoSendIntervals >= kDesktopStallIntervalsBeforeRecovery) {
         m_desktopNoSendIntervals = 0;
         m_roomDialog->slot_setMediaStatus("视频通道停滞，正在重新连接…");
+        if (m_useWebRtc) { Q_EMIT SIG_resetVideoEncoder(); return; }
         m_avChannelRegistered[1].store(false);
         if (m_tcpAV[1]) {
             m_tcpAV[1]->CloseNet();
@@ -2008,6 +2033,7 @@ void CKernal::slot_videoFrameDecoded(int userId, int roomId, quint64 generation,
 
 bool CKernal::hasAuthenticatedControlConnection() const
 {
+    if (m_useWebRtc) return m_gateway && m_gateway->authenticated() && m_loggedIn;
     return m_controlSocket &&
             m_controlSocket->state() == QAbstractSocket::ConnectedState &&
             m_loggedIn && m_userid > 0;
@@ -2055,6 +2081,7 @@ bool CKernal::sendControlPacket(const char *data, int length, bool requiresLogin
 
 void CKernal::ensureControlConnection()
 {
+    if (m_useWebRtc) return;
     if (!m_controlSocket || m_shuttingDown ||
             m_controlSocket->state() == QAbstractSocket::ConnectedState ||
             m_controlSocket->state() == QAbstractSocket::ConnectingState ||
@@ -2066,6 +2093,7 @@ void CKernal::ensureControlConnection()
 
 void CKernal::ensureAvConnections(bool forceRegistration)
 {
+    if (m_useWebRtc) return;
     for (int i = 0; i < 2; ++i) {
         if (!ensureAvChannelReady(i, forceRegistration)) {
             scheduleAvChannelRecovery(i);
@@ -2140,6 +2168,7 @@ void CKernal::discardAvChannel(int channel)
 
 bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
 {
+    if (m_useWebRtc) return m_rtc && m_rtc->state() == RtcSession::State::Connected;
     if (channel < 0 || channel > 1) return false;
     // Connection lifecycle and Qt timers belong to the GUI thread. Video sends
     // may originate on SendThread, which only reads the atomic ready flag.
@@ -2349,6 +2378,7 @@ void CKernal::beginControlRecovery()
 
 void CKernal::failLogin()
 {
+    if (m_useWebRtc && m_gateway) m_gateway->logout();
     if (!m_loginPending) return;
     m_loginPending = false;
     m_loginRequest.clear();
@@ -2428,6 +2458,7 @@ void CKernal::clearPendingProfileSave()
 bool CKernal::queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
                                  const QByteArray& avatarData, bool avatarChanged)
 {
+    if (m_useWebRtc) { if (!m_gateway->authenticated()) return false; m_webAvatarChanged = avatarChanged; m_webAvatar = avatarData; m_gateway->updateProfile(name, iconid, feeling); return true; }
     if (!hasAuthenticatedControlConnection()) {
         beginControlRecovery();
         return false;
@@ -2499,6 +2530,7 @@ bool CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
 // 登录提交
 void CKernal::slot_loginCommit(QString tel, QString passwd)
 {
+    if (m_useWebRtc) { webLogin(tel, passwd); return; }
     if (m_loginPending) {
         return;
     }
@@ -2537,6 +2569,7 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
                                   int iconid, QByteArray avatarData, bool avatarChanged)
 {
+    if (m_useWebRtc) { webRegister(tel, passwd, nickname, iconid, avatarData, avatarChanged); return; }
     const QByteArray telUtf8 = tel.toUtf8();
     const QByteArray passwordHash = QCryptographicHash::hash(
                 passwd.toUtf8(), QCryptographicHash::Md5).toHex();
@@ -2563,6 +2596,7 @@ void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
 // 加入房间
 void CKernal::slot_joinRoom()
 {
+    if (m_useWebRtc) { webJoinRoom(); return; }
     if (m_roomid != 0) {
         QMessageBox::about(this->m_demoDialog, "提示", "已在房间中,加入失败");
         return;
@@ -2606,6 +2640,7 @@ void CKernal::slot_joinRoom()
 // 创建房间
 void CKernal::slot_createRoom()
 {
+    if (m_useWebRtc) { if (m_roomid || m_roomRequest != RoomRequest::None) return; beginRoomRequest(RoomRequest::Create); m_gateway->createRoom(); return; }
     if (m_roomid != 0 || m_roomRequest != RoomRequest::None) {
         return;
     }

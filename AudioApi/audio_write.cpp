@@ -4,13 +4,13 @@
 #include <cstdint>
 #include <cstring>
 
-Audio_Write::Audio_Write(QObject *parent)
+Audio_Write::Audio_Write(QObject *parent, bool pcmMode)
     : QObject(parent),
       audio_out(nullptr),
       myBuffer_out(nullptr),
       Dec_State(nullptr)
 {
-    format.setSampleRate(8000);
+    format.setSampleRate(pcmMode ? 48000 : 8000);
     format.setChannelCount(1);
     format.setSampleFormat(QAudioFormat::Int16);
 
@@ -19,6 +19,7 @@ Audio_Write::Audio_Write(QObject *parent)
         if (!device.isFormatSupported(format))
             qWarning() << "The output device does not report native 8 kHz mono support";
         audio_out = new QAudioSink(device, format, this);
+        if (pcmMode) audio_out->setBufferSize(4800);
         myBuffer_out = audio_out->start();
     } else {
         qWarning() << "No audio output device is available";
@@ -67,4 +68,11 @@ void Audio_Write::slot_net_rx(QByteArray ba)
 
     myBuffer_out->write(pcm, sizeof(pcm));
 #endif
+}
+
+void Audio_Write::slot_pcm_rx(const QByteArray &pcm)
+{
+    if (!audio_out || !myBuffer_out || pcm.isEmpty()) return;
+    const qint64 count = qMin<qint64>(pcm.size(), audio_out->bytesFree()) & ~qint64(1);
+    if (count > 0) myBuffer_out->write(pcm.constData(), count);
 }

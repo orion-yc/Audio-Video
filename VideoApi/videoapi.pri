@@ -39,20 +39,12 @@ LIBS += $$FFMPEG_ROOT/lib/avcodec.lib \
 
 win32:LIBS += d3d11.lib dxgi.lib
 
-# The LiveKit C++ SDK is optional during the migration. A root directory alone
-# never enables the client: LIVEKIT_SDK_ADAPTER must identify a compiled,
-# ABI-matched adapter so an arbitrary library cannot be mistaken for WebRTC.
+# Pin the native SDK ABI. The release script installs this verified bundle.
 isEmpty(LIVEKIT_SDK_ROOT) {
-    message("LiveKit C++ SDK not configured; legacy TCP transport remains available.")
-} else {
-    isEmpty(LIVEKIT_SDK_ADAPTER) {
-        warning("LIVEKIT_SDK_ROOT supplied without LIVEKIT_SDK_ADAPTER; native WebRTC remains disabled.")
-    } else {
-        DEFINES += AUDIO_VIDEO_LIVEKIT_SDK AUDIO_VIDEO_LIVEKIT_NATIVE_ADAPTER
-        INCLUDEPATH += $$LIVEKIT_SDK_ROOT/include
-        INCLUDEPATH += $$LIVEKIT_SDK_ADAPTER/include
-        SOURCES += $$LIVEKIT_SDK_ADAPTER/livekit_session_adapter.cpp
-        HEADERS += $$LIVEKIT_SDK_ADAPTER/livekit_session_adapter.h
-        LIBS += -L$$LIVEKIT_SDK_ROOT/lib -llivekit
-    }
+    LIVEKIT_SDK_ROOT = $$PWD/../third_party/livekit-1.13.0/livekit-sdk-windows-x64-1.13.0
 }
+!exists($$LIVEKIT_SDK_ROOT/include/livekit/encoded_video_source.h) {
+    error("Run packaging/install-livekit-sdk.ps1 before building.")
+}
+INCLUDEPATH += $$LIVEKIT_SDK_ROOT/include
+LIBS += $$LIVEKIT_SDK_ROOT/lib/livekit.lib

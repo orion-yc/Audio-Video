@@ -1,3 +1,17 @@
+Audio-Video 2.0
+
+config.ini defaults to HTTPS API + LiveKit WebRTC:
+[Net]
+transport=webrtc
+gateway=https://video.onnotify.top
+livekit=wss://video.onnotify.top
+
+Copy the complete room ID returned by the server to join (room-xxxxxxxx).
+Keep livekit.dll, livekit_ffi.dll and all Qt runtime files beside the application.
+The old host/port settings are used only with transport=tcp.
+
+The following legacy deployment details apply only to transport=tcp.
+
 Audio-Video MSVC 1.1.14
 ======================
 

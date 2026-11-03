@@ -34,6 +34,7 @@ public:
 
 public slots:
     void startCapture();
+    void setSampleRate(int rate) { if (!isRunning() && (rate == 48000 || rate == 8000)) m_sampleRate.store(rate); }
     void stopCapture();
     void setDeviceId(const QString &deviceId);
 
@@ -55,6 +56,7 @@ private:
     QString m_activeDeviceId;
     QTimer m_defaultDeviceTimer;
     QTimer m_retryTimer;
+    std::atomic_int m_sampleRate {8000};
     std::atomic_bool m_captureRequested { false };
 };
 

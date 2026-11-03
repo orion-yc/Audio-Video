@@ -19,9 +19,11 @@ public:
 signals:
     //定时采集的数据, 以信号形式发送
     void SIG_audioFrame( QByteArray &ba);
+    void SIG_pcmFrame(QByteArray pcm);
 public slots:
 //开始采集
     void start();
+    void setPcmMode(bool enabled);
 //暂停采集
     void pause();
     // Enable/disable mixing of the WASAPI system-output stream.
@@ -33,6 +35,8 @@ private:
     void drainMixedFrames();
     void encodeAndEmit(const QByteArray &pcm);
 
+    bool m_pcmMode = false;
+    qsizetype m_pcmFrameBytes = 640;
     QAudioFormat    format;
     QTimer*         m_timer;
     QAudioSource*   audio_in ;

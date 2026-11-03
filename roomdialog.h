@@ -44,6 +44,7 @@ public:
     ~RoomDialog();
 public slots:
     void slot_setRoomID(int roomid);
+    void slot_setRoomName(const QString &roomId);
     void slot_setMediaStatus(const QString &text);
 private:
     QLabel* m_mediaStatus = nullptr;

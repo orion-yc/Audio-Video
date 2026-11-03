@@ -9,6 +9,7 @@ DEFINES += AUDIO_VIDEO_TESTING
 SOURCES += \
     network_recovery.cpp \
     ../ckernal.cpp \
+    ../web_client.cpp \
     ../logindialog.cpp \
     ../demodialog.cpp \
     ../roomdialog.cpp \

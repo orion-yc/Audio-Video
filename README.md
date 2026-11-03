@@ -1,3 +1,22 @@
+# Audio-Video 2.0 transport migration
+
+The default client now uses HTTPS control APIs, WSS room chat and native LiveKit WebRTC media.
+See [the current configuration and build instructions](README.zh-CN.md).
+The TCP/FRP details below apply only when `[Net] transport=tcp` is explicitly selected.
+
+```ini
+[Net]
+transport=webrtc
+gateway=https://video.onnotify.top
+livekit=wss://video.onnotify.top
+```
+
+The implementation pins LiveKit C++ SDK 1.13.0, passes the existing H.264 encoder output to
+its pre-encoded source, handles keyframe/rate-control feedback, and sends 48 kHz mixed audio
+through Opus. Native Windows capture and 4K/60 fps still require Windows validation.
+
+---
+
 # Audio-Video
 
 [简体中文](README.zh-CN.md) | English

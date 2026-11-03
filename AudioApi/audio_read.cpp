@@ -6,16 +6,16 @@
 
 namespace {
 constexpr qsizetype kPcmFrameBytes = 640;
-constexpr qsizetype kMaxPendingPcmBytes = kPcmFrameBytes * 8;
 
-void trimPendingPcm(QByteArray &buffer)
+void trimPendingPcm(QByteArray &buffer, qsizetype frameBytes)
 {
-    if (buffer.size() <= kMaxPendingPcmBytes) {
+    const qsizetype maxPending = frameBytes * 5;
+    if (buffer.size() <= maxPending) {
         return;
     }
-    const qsizetype excess = buffer.size() - kMaxPendingPcmBytes;
-    const qsizetype framesToDrop = (excess + kPcmFrameBytes - 1) / kPcmFrameBytes;
-    buffer.remove(0, qMin(buffer.size(), framesToDrop * kPcmFrameBytes));
+    const qsizetype excess = buffer.size() - maxPending;
+    const qsizetype framesToDrop = (excess + frameBytes - 1) / frameBytes;
+    buffer.remove(0, qMin(buffer.size(), framesToDrop * frameBytes));
 }
 }
 
@@ -116,7 +116,7 @@ void Audio_Read::slot_systemAudioFrame(const QByteArray &pcm)
     }
 
     m_systemPcmPending.append(pcm);
-    trimPendingPcm(m_systemPcmPending);
+    trimPendingPcm(m_systemPcmPending, m_pcmFrameBytes);
     drainMixedFrames();
 }
 
@@ -126,7 +126,7 @@ void Audio_Read::slot_readMore()
         return;
 
     const qint64 available = audio_in->bytesAvailable();
-    const qint64 readSize = qMin(available, static_cast<qint64>(kMaxPendingPcmBytes));
+    const qint64 readSize = qMin(available, static_cast<qint64>(m_pcmFrameBytes * 5));
     if (readSize <= 0)
         return;
 
@@ -135,12 +135,13 @@ void Audio_Read::slot_readMore()
         return;
 
     m_micPcmPending.append(pcm);
-    trimPendingPcm(m_micPcmPending);
+    trimPendingPcm(m_micPcmPending, m_pcmFrameBytes);
     drainMixedFrames();
 }
 
 void Audio_Read::drainMixedFrames()
 {
+    const qsizetype frameBytes = m_pcmFrameBytes;
     const bool micEnabled = m_recordState == audio_state::_Record;
     const bool systemEnabled = m_systemAudioEnabled;
     if (!micEnabled && !systemEnabled) {
@@ -148,8 +149,8 @@ void Audio_Read::drainMixedFrames()
     }
 
     while (true) {
-        const bool hasMic = micEnabled && m_micPcmPending.size() >= kPcmFrameBytes;
-        const bool hasSystem = systemEnabled && m_systemPcmPending.size() >= kPcmFrameBytes;
+        const bool hasMic = micEnabled && m_micPcmPending.size() >= frameBytes;
+        const bool hasSystem = systemEnabled && m_systemPcmPending.size() >= frameBytes;
         if (!hasMic && !hasSystem) {
             return;
         }
@@ -170,18 +171,18 @@ void Audio_Read::drainMixedFrames()
             m_mixWaitTimer.invalidate();
         }
 
-        QByteArray mixed(kPcmFrameBytes, 0);
-        const QByteArray micFrame = hasMic ? m_micPcmPending.left(kPcmFrameBytes) : QByteArray();
-        const QByteArray systemFrame = hasSystem ? m_systemPcmPending.left(kPcmFrameBytes)
+        QByteArray mixed(frameBytes, 0);
+        const QByteArray micFrame = hasMic ? m_micPcmPending.left(frameBytes) : QByteArray();
+        const QByteArray systemFrame = hasSystem ? m_systemPcmPending.left(frameBytes)
                                                   : QByteArray();
         if (hasMic) {
-            m_micPcmPending.remove(0, kPcmFrameBytes);
+            m_micPcmPending.remove(0, frameBytes);
         }
         if (hasSystem) {
-            m_systemPcmPending.remove(0, kPcmFrameBytes);
+            m_systemPcmPending.remove(0, frameBytes);
         }
 
-        constexpr int sampleCount = static_cast<int>(kPcmFrameBytes / sizeof(std::int16_t));
+        const int sampleCount = static_cast<int>(frameBytes / sizeof(std::int16_t));
         const bool attenuate = hasMic && hasSystem;
         for (int index = 0; index < sampleCount; ++index) {
             std::int16_t micSample = 0;
@@ -212,6 +213,7 @@ void Audio_Read::drainMixedFrames()
 
 void Audio_Read::encodeAndEmit(const QByteArray &pcm)
 {
+    if (m_pcmMode) { Q_EMIT SIG_pcmFrame(pcm); return; }
     if (pcm.size() < kPcmFrameBytes) {
         return;
     }
@@ -245,4 +247,14 @@ void Audio_Read::encodeAndEmit(const QByteArray &pcm)
 
     Q_EMIT SIG_audioFrame(encoded);
 #endif
+}
+
+void Audio_Read::setPcmMode(bool enabled)
+{
+    if (m_recordState == audio_state::_Record) return;
+    m_pcmMode = enabled;
+    format.setSampleRate(enabled ? 48000 : 8000);
+    m_pcmFrameBytes = enabled ? 1920 : 640;
+    m_micPcmPending.clear();
+    m_systemPcmPending.clear();
 }

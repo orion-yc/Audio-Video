@@ -4,7 +4,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++17
 
-VERSION = 1.1.14.0
+VERSION = 2.0.0.0
 TARGET = Audio-Video
 QMAKE_TARGET_PRODUCT = Audio-Video
 QMAKE_TARGET_DESCRIPTION = Audio-Video conferencing client
@@ -16,6 +16,7 @@ win32:RC_ICONS = images/app-icon.ico
 
 SOURCES += \
     ckernal.cpp \
+    web_client.cpp \
     logindialog.cpp \
     main.cpp \
     demodialog.cpp \

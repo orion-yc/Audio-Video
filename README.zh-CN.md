@@ -1,3 +1,30 @@
+# Audio-Video 2.0：HTTP + LiveKit 客户端
+
+默认使用 HTTPS API 登录、管理房间/资料/头像，WSS 传输公共聊天，LiveKit WebRTC 传输 H.264 和 Opus。
+下面旧版本的 TCP/FRP 说明仅适用于显式选择 `transport=tcp` 的兼容模式。
+
+- 房间号使用服务端返回的完整字符串，例如 `room-a1b2c3d4`，加入房间时直接粘贴。
+- 保留现有 H.264/NVENC 编码，通过官方 LiveKit SDK 1.13.0 的预编码源发送；不二次编码。
+- 语音与系统声音使用 48 kHz 单声道 PCM 混音，经 LiveKit 编码成 Opus；媒体不再依赖 Speex/TCP。
+- 根据 WebRTC 关键帧反馈重置编码器，根据带宽反馈调整编码码率。实际 4K/60 fps 效果仍需设备和网络验收。
+- JWT 只保存在内存中；登录密码通过 HTTPS 发送，不再给 HTTP 服务提交旧 TCP 协议的 MD5 字符串。
+- API 和信令使用域名的 443；媒体直达服务器，部署侧仍需放行 TCP 7881、UDP 50000–51000。
+
+Windows 构建：
+
+```powershell
+.\packaging\build-release-msvc.ps1 -Version 2.0.0
+```
+
+脚本会下载并校验固定版本的原生 SDK，编译后将 `livekit.dll`、`livekit_ffi.dll`、
+`Qt6WebSockets.dll` 与现有运行库一起打包。只配置 SDK 目录的旧占位适配器已替换为实际实现。
+
+联调工程：`tests/webrtc_integration.pro`。它创建两个临时账户，通过实际 HTTP API 验证
+登录、资料、头像和双向聊天，并让观看端在共享开始后再加入，检查 H.264 解码及 Opus 收音。
+账户和头像需要在测试后清理。该测试不等同于 Windows 摄像头/麦克风/4K 桌面联调。
+
+---
+
 # Audio-Video
 
 [English](README.md) | 简体中文
@@ -38,8 +65,9 @@ Audio-Video 是一款面向小型实时会议的 Windows 桌面客户端。项�
 
 ```ini
 [Net]
-host=8.163.3.67
-port=8000
+transport=webrtc
+gateway=https://video.onnotify.top
+livekit=wss://video.onnotify.top
 ```
 
 服务部署在其他位置时，先修改该文件中的地址和端口再分发。每位参会者都需要能够与这里配置的主机和端口建立持续的 TCP 连接。
