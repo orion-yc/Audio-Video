@@ -111,26 +111,12 @@ bool DxgiDesktopCapture::ensureStagingTexture(const D3D11_TEXTURE2D_DESC &source
 
 bool DxgiDesktopCapture::copyMappedFrame(const DXGI_OUTDUPL_FRAME_INFO &frameInfo,
                                          const D3D11_MAPPED_SUBRESOURCE &mapped,
-                                         const QSize &size)
+                                         const QSize &size,
+                                         const std::vector<RECT> &dirtyRects)
 {
+    Q_UNUSED(frameInfo);
     if (m_lastImage.isNull()) {
         return false;
-    }
-
-    std::vector<RECT> dirtyRects;
-    if (frameInfo.TotalMetadataBufferSize > 0) {
-        dirtyRects.resize(frameInfo.TotalMetadataBufferSize / sizeof(RECT) + 1);
-        UINT bytes = frameInfo.TotalMetadataBufferSize;
-        if (FAILED(m_duplication->GetFrameDirtyRects(
-                       static_cast<UINT>(dirtyRects.size() * sizeof(RECT)),
-                       dirtyRects.data(), &bytes))) {
-            dirtyRects.clear();
-        } else {
-            dirtyRects.resize(bytes / sizeof(RECT));
-        }
-    }
-    if (dirtyRects.empty()) {
-        dirtyRects.push_back(RECT{0, 0, size.width(), size.height()});
     }
 
     const auto *source = static_cast<const uchar *>(mapped.pData);
@@ -187,12 +173,35 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
     if (SUCCEEDED(resource.As(&source))) {
         source->GetDesc(&sourceDescription);
         if (ensureStagingTexture(sourceDescription)) {
-            m_context->CopyResource(m_staging.Get(), source.Get());
+            std::vector<RECT> dirtyRects;
+            if (frameInfo.TotalMetadataBufferSize > 0) {
+                dirtyRects.resize(frameInfo.TotalMetadataBufferSize / sizeof(RECT) + 1);
+                UINT bytes = frameInfo.TotalMetadataBufferSize;
+                if (FAILED(m_duplication->GetFrameDirtyRects(
+                               static_cast<UINT>(dirtyRects.size() * sizeof(RECT)),
+                               dirtyRects.data(), &bytes))) {
+                    dirtyRects.clear();
+                } else {
+                    dirtyRects.resize(bytes / sizeof(RECT));
+                }
+            }
+            if (dirtyRects.empty()) {
+                dirtyRects.push_back(RECT{0, 0, static_cast<LONG>(sourceDescription.Width),
+                                          static_cast<LONG>(sourceDescription.Height)});
+            }
+            for (const RECT &dirty : dirtyRects) {
+                D3D11_BOX box{static_cast<UINT>(dirty.left), static_cast<UINT>(dirty.top), 0,
+                              static_cast<UINT>(dirty.right), static_cast<UINT>(dirty.bottom), 1};
+                m_context->CopySubresourceRegion(m_staging.Get(), 0,
+                    static_cast<UINT>(dirty.left), static_cast<UINT>(dirty.top), 0,
+                    source.Get(), 0, &box);
+            }
             D3D11_MAPPED_SUBRESOURCE mapped = {};
             if (SUCCEEDED(m_context->Map(m_staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
                 copied = copyMappedFrame(frameInfo, mapped,
                                          QSize(static_cast<int>(sourceDescription.Width),
-                                               static_cast<int>(sourceDescription.Height)));
+                                               static_cast<int>(sourceDescription.Height)),
+                                         dirtyRects);
                 m_context->Unmap(m_staging.Get(), 0);
             }
         }

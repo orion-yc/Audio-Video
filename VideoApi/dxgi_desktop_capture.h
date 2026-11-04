@@ -3,6 +3,7 @@
 
 #include <QImage>
 #include <QString>
+#include <vector>
 
 #ifdef Q_OS_WIN
 #include <d3d11.h>
@@ -25,7 +26,7 @@ private:
     bool ensureStagingTexture(const D3D11_TEXTURE2D_DESC &sourceDescription);
     bool copyMappedFrame(const DXGI_OUTDUPL_FRAME_INFO &frameInfo,
                          const D3D11_MAPPED_SUBRESOURCE &mapped,
-                         const QSize &size);
+                         const QSize &size, const std::vector<RECT> &dirtyRects);
 
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
