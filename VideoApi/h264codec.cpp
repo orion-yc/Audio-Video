@@ -1,4 +1,5 @@
 #include "h264codec.h"
+#include "../diagnostics.h"
 
 #include <QDebug>
 
@@ -84,6 +85,9 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
 {
     const AVCodec *codec = avcodec_find_encoder_by_name(encoderName);
     if (!codec) {
+        DiagnosticLogger::instance().logEvent(QStringLiteral("h264_encoder_unavailable"),
+                                              {{QStringLiteral("encoder"),
+                                                QString::fromLatin1(encoderName)}});
         return false;
     }
 
@@ -143,6 +147,10 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
         qInfo().noquote() << "H.264 encoder" << encoderName
                           << "is unavailable:" << ffmpegError(openResult);
         avcodec_free_context(&context);
+        DiagnosticLogger::instance().logEvent(QStringLiteral("h264_encoder_open_failed"),
+                                              {{QStringLiteral("encoder"),
+                                                QString::fromLatin1(encoderName)},
+                                               {QStringLiteral("error"), ffmpegError(openResult)}});
         return false;
     }
 
@@ -177,6 +185,13 @@ bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
     m_backendName = QString::fromLatin1(encoderName);
     qInfo() << "H.264 encoder selected:" << m_backendName
             << m_size << frameRate << "fps" << bitRate / 1000000 << "Mbps";
+    DiagnosticLogger::instance().logEvent(QStringLiteral("h264_encoder_selected"),
+                                          {{QStringLiteral("encoder"), m_backendName},
+                                           {QStringLiteral("width"), m_size.width()},
+                                           {QStringLiteral("height"), m_size.height()},
+                                           {QStringLiteral("fps"), frameRate},
+                                           {QStringLiteral("bitrate_bps"), bitRate},
+                                           {QStringLiteral("desktop"), desktopContent}});
     return true;
 }
 

@@ -1,6 +1,8 @@
 #include "desk_read.h"
+#include "../diagnostics.h"
 
 #include <QCursor>
+#include <QElapsedTimer>
 #include <QPainter>
 #include <QPolygonF>
 
@@ -161,23 +163,43 @@ void Desk_Read::slot_getScreenFrame()
         return;
     }
     QImage image;
+    QElapsedTimer captureTimer;
+    captureTimer.start();
+    DesktopCaptureTiming captureTiming;
     // DXGI duplication avoids the compositor round-trip and the QPixmap
     // conversion used by the legacy fallback. It also lets us reuse the last
     // desktop image when only the cursor moves.
-    if (!m_dxgiCapture->capture(src->name(), &image)) {
+    const bool dxgiCaptured = m_dxgiCapture->capture(src->name(), &image, &captureTiming);
+    const QString backend = dxgiCaptured ? QStringLiteral("dxgi") : QStringLiteral("qscreen");
+    if (backend != m_lastCaptureBackend) {
+        m_lastCaptureBackend = backend;
+        DiagnosticLogger::instance().logEvent(QStringLiteral("desktop_capture_backend"),
+                                              {{QStringLiteral("backend"), backend},
+                                               {QStringLiteral("screen"), src->name()}});
+    }
+    if (!dxgiCaptured) {
         image = src->grabWindow(0).toImage();
     }
+    captureTiming.captureUs = captureTimer.nsecsElapsed() / 1000;
     const int maxWidth = m_maxWidth.load();
     const int maxHeight = m_maxHeight.load();
+    QElapsedTimer scaleTimer;
+    scaleTimer.start();
     if (image.width() > maxWidth || image.height() > maxHeight) {
         image = image.scaled(maxWidth, maxHeight,
                              Qt::KeepAspectRatio, Qt::FastTransformation);
     }
+    const qint64 scaleUs = scaleTimer.nsecsElapsed() / 1000;
     // QScreen::grabWindow does not include the hardware cursor on Windows.
     // Composite the current pointer into the shared pixels automatically so
     // viewers see mouse operations without any extra UI or notification.
+    QElapsedTimer mouseTimer;
+    mouseTimer.start();
     overlayCursor(&image, src, QPoint(m_cursorX.load(), m_cursorY.load()));
+    const qint64 mouseUs = mouseTimer.nsecsElapsed() / 1000;
     if (m_capturing.load() && !image.isNull()) {
+        DiagnosticLogger::instance().recordCaptureFrame(captureTiming, scaleUs, mouseUs,
+                                                         image.width(), image.height());
         Q_EMIT SIG_screenFrame(image);
     }
     m_frameQueued.store(false);

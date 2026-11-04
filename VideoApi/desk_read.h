@@ -60,6 +60,7 @@ private:
     std::atomic_int m_cursorY { 0 };
     mutable QMutex m_captureScreenMutex;
     QString m_captureScreenName;
+    QString m_lastCaptureBackend;
     std::unique_ptr<DxgiDesktopCapture> m_dxgiCapture;
 };
 

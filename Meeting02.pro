@@ -16,6 +16,7 @@ win32:RC_ICONS = images/app-icon.ico
 
 SOURCES += \
     ckernal.cpp \
+    diagnostics.cpp \
     web_client.cpp \
     logindialog.cpp \
     main.cpp \
@@ -28,6 +29,7 @@ SOURCES += \
 
 HEADERS += \
     ckernal.h \
+    diagnostics.h \
     demodialog.h \
     logindialog.h \
     roomdialog.h \

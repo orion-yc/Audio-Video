@@ -37,7 +37,7 @@ LIBS += $$FFMPEG_ROOT/lib/avcodec.lib \
     $$FFMPEG_ROOT/lib/avutil.lib \
     $$FFMPEG_ROOT/lib/swscale.lib
 
-win32:LIBS += d3d11.lib dxgi.lib
+win32:LIBS += d3d11.lib dxgi.lib user32.lib
 
 # Pin the native SDK ABI. The release script installs this verified bundle.
 isEmpty(LIVEKIT_SDK_ROOT) {

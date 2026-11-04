@@ -2,13 +2,66 @@
 
 #ifdef Q_OS_WIN
 
+#include <QElapsedTimer>
 #include <QRect>
 
-#include <algorithm>
+#include <windows.h>
+
 #include <cstring>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
+
+namespace {
+bool outputMatchesRequestedName(const QString &requested, const DXGI_OUTPUT_DESC &description)
+{
+    if (requested.isEmpty()) {
+        return true;
+    }
+    const QString dxgiName = QString::fromWCharArray(description.DeviceName);
+    if (requested.compare(dxgiName, Qt::CaseInsensitive) == 0 ||
+        requested.contains(dxgiName, Qt::CaseInsensitive) ||
+        dxgiName.contains(requested, Qt::CaseInsensitive)) {
+        return true;
+    }
+
+    // QScreen::name() normally returns the monitor model (for example
+    // "H27T22X"), while DXGI exposes the logical display name
+    // ("\\\\.\\DISPLAY1"). Resolve the model through the Win32 monitor
+    // device so physical screen selection maps to Desktop Duplication.
+    if (!description.Monitor) {
+        return false;
+    }
+    MONITORINFOEXW monitorInfo = {};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (!GetMonitorInfoW(description.Monitor, &monitorInfo)) {
+        return false;
+    }
+    const QString monitorDeviceName = QString::fromWCharArray(monitorInfo.szDevice);
+    DISPLAY_DEVICEW adapterDisplay = {};
+    adapterDisplay.cb = sizeof(adapterDisplay);
+    for (DWORD index = 0; EnumDisplayDevicesW(nullptr, index, &adapterDisplay, 0); ++index) {
+        if (monitorDeviceName.compare(QString::fromWCharArray(adapterDisplay.DeviceName),
+                                      Qt::CaseInsensitive) != 0) {
+            adapterDisplay = {};
+            adapterDisplay.cb = sizeof(adapterDisplay);
+            continue;
+        }
+        DISPLAY_DEVICEW monitorDisplay = {};
+        monitorDisplay.cb = sizeof(monitorDisplay);
+        if (EnumDisplayDevicesW(adapterDisplay.DeviceName, 0, &monitorDisplay, 0)) {
+            const QString model = QString::fromWCharArray(monitorDisplay.DeviceString);
+            if (requested.compare(model, Qt::CaseInsensitive) == 0 ||
+                requested.contains(model, Qt::CaseInsensitive) ||
+                model.contains(requested, Qt::CaseInsensitive)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+} // namespace
 
 DxgiDesktopCapture::DxgiDesktopCapture() = default;
 
@@ -35,51 +88,60 @@ bool DxgiDesktopCapture::initialize(const QString &outputName)
     }
     reset();
 
-    D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
-    const HRESULT deviceResult = D3D11CreateDevice(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        nullptr, 0, D3D11_SDK_VERSION, &m_device, &featureLevel, &m_context);
-    if (FAILED(deviceResult)) {
+    // Enumerate adapters and create the device on the adapter that owns the
+    // selected monitor. This avoids falling back to slow QScreen capture on
+    // hybrid-GPU laptops.
+    ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
         return false;
     }
-
-    ComPtr<IDXGIDevice> dxgiDevice;
-    if (FAILED(m_device.As(&dxgiDevice))) {
-        reset();
-        return false;
-    }
-    ComPtr<IDXGIAdapter> adapter;
-    if (FAILED(dxgiDevice->GetAdapter(&adapter))) {
-        reset();
-        return false;
-    }
-
-    for (UINT index = 0;; ++index) {
-        ComPtr<IDXGIOutput> output;
-        if (adapter->EnumOutputs(index, &output) == DXGI_ERROR_NOT_FOUND) {
+    for (UINT adapterIndex = 0;; ++adapterIndex) {
+        ComPtr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(adapterIndex, &adapter) == DXGI_ERROR_NOT_FOUND) {
             break;
         }
-        if (!output) {
+        if (!adapter) {
             continue;
         }
-        DXGI_OUTPUT_DESC description = {};
-        if (FAILED(output->GetDesc(&description))) {
-            continue;
-        }
-        const QString deviceName = QString::fromWCharArray(description.DeviceName);
-        if (!outputName.isEmpty() && outputName != deviceName &&
-            !outputName.contains(deviceName) && !deviceName.contains(outputName)) {
+        DXGI_ADAPTER_DESC1 adapterDescription = {};
+        if (FAILED(adapter->GetDesc1(&adapterDescription)) ||
+            (adapterDescription.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
             continue;
         }
 
-        ComPtr<IDXGIOutput1> output1;
-        if (FAILED(output.As(&output1)) ||
-            FAILED(output1->DuplicateOutput(m_device.Get(), &m_duplication))) {
-            reset();
-            return false;
+        for (UINT outputIndex = 0;; ++outputIndex) {
+            ComPtr<IDXGIOutput> output;
+            if (adapter->EnumOutputs(outputIndex, &output) == DXGI_ERROR_NOT_FOUND) {
+                break;
+            }
+            if (!output) {
+                continue;
+            }
+            DXGI_OUTPUT_DESC description = {};
+            if (FAILED(output->GetDesc(&description)) ||
+                !outputMatchesRequestedName(outputName, description)) {
+                continue;
+            }
+
+            D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+            const HRESULT deviceResult = D3D11CreateDevice(
+                adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+                &m_device, &featureLevel, &m_context);
+            if (FAILED(deviceResult)) {
+                reset();
+                continue;
+            }
+
+            ComPtr<IDXGIOutput1> output1;
+            if (FAILED(output.As(&output1)) ||
+                FAILED(output1->DuplicateOutput(m_device.Get(), &m_duplication))) {
+                reset();
+                continue;
+            }
+            m_outputName = QString::fromWCharArray(description.DeviceName);
+            return true;
         }
-        m_outputName = deviceName;
-        return true;
     }
     reset();
     return false;
@@ -134,8 +196,14 @@ bool DxgiDesktopCapture::copyMappedFrame(const DXGI_OUTDUPL_FRAME_INFO &frameInf
     return true;
 }
 
-bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
+bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image,
+                                 DesktopCaptureTiming *timing)
 {
+    QElapsedTimer totalTimer;
+    totalTimer.start();
+    if (timing) {
+        *timing = DesktopCaptureTiming();
+    }
     if (!image || !initialize(outputName)) {
         return false;
     }
@@ -146,6 +214,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
     if (acquireResult == DXGI_ERROR_WAIT_TIMEOUT) {
         if (!m_lastImage.isNull()) {
             *image = m_lastImage;
+            if (timing) timing->captureUs = totalTimer.nsecsElapsed() / 1000;
             return true;
         }
         return false;
@@ -158,12 +227,10 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
         return false;
     }
 
-    // Desktop Duplication can wake for a pointer-only update. The application
-    // composites the pointer itself after capture, so keep the cached desktop
-    // pixels and avoid a full GPU-to-CPU frame readback in that case.
     if (frameInfo.LastPresentTime.QuadPart == 0 && !m_lastImage.isNull()) {
         m_duplication->ReleaseFrame();
         *image = m_lastImage;
+        if (timing) timing->captureUs = totalTimer.nsecsElapsed() / 1000;
         return true;
     }
 
@@ -196,6 +263,8 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
                     static_cast<UINT>(dirty.left), static_cast<UINT>(dirty.top), 0,
                     source.Get(), 0, &box);
             }
+            QElapsedTimer gpuTimer;
+            gpuTimer.start();
             D3D11_MAPPED_SUBRESOURCE mapped = {};
             if (SUCCEEDED(m_context->Map(m_staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
                 copied = copyMappedFrame(frameInfo, mapped,
@@ -203,6 +272,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
                                                static_cast<int>(sourceDescription.Height)),
                                          dirtyRects);
                 m_context->Unmap(m_staging.Get(), 0);
+                if (timing) timing->gpuToCpuUs = gpuTimer.nsecsElapsed() / 1000;
             }
         }
     }
@@ -211,6 +281,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
         return false;
     }
     *image = m_lastImage;
+    if (timing) timing->captureUs = totalTimer.nsecsElapsed() / 1000;
     return true;
 }
 
@@ -218,7 +289,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image)
 
 DxgiDesktopCapture::DxgiDesktopCapture() = default;
 DxgiDesktopCapture::~DxgiDesktopCapture() = default;
-bool DxgiDesktopCapture::capture(const QString &, QImage *) { return false; }
+bool DxgiDesktopCapture::capture(const QString &, QImage *, DesktopCaptureTiming *) { return false; }
 void DxgiDesktopCapture::reset() {}
 
 #endif

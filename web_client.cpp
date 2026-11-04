@@ -11,6 +11,7 @@ int userId(const QString &identity) {
     if(!identity.startsWith("user-"))return 0;
     bool ok=false;const int id=identity.mid(5).toInt(&ok);return ok&&id>0?id:0;
 }
+constexpr int kMinimumDesktopFeedbackBitrate = 6 * 1000 * 1000;
 }
 void CKernal::setupWebRtc() {
     m_gateway=new GatewayClient(this);m_gateway->setBaseUrl(QUrl(m_gatewayUrl));
@@ -105,7 +106,9 @@ void CKernal::setupWebRtc() {
     connect(m_rtc,&RtcSession::SIG_bitrateRequested,this,[this](int rate){
         if(m_webBitrateClock.isValid()&&m_webBitrateClock.elapsed()<1000)return;
         const int capped=qBound(250000,rate,72000000);
-        if(m_webTargetBitrate==0||qAbs(capped-m_webTargetBitrate)>m_webTargetBitrate/5){m_webTargetBitrate=capped;m_webBitrateClock.restart();}
+        const int effective = m_activeVideoSource == VideoSource::Desktop
+                ? qMax(kMinimumDesktopFeedbackBitrate, capped) : capped;
+        if(m_webTargetBitrate==0||qAbs(effective-m_webTargetBitrate)>m_webTargetBitrate/5){m_webTargetBitrate=effective;m_webBitrateClock.restart();}
     });
     connect(m_rtc,&RtcSession::SIG_videoSent,this,[this]{if(m_activeVideoSource==VideoSource::Desktop)++m_webSentFrames;});
 }

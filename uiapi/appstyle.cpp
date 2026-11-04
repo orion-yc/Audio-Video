@@ -128,7 +128,8 @@ void applyAppStyle(QApplication &application)
         QPushButton#pb_min,
         QPushButton#pb_max,
         QPushButton#pb_hide,
-        QPushButton#pb_close {
+        QPushButton#pb_close,
+        QToolButton#pb_diagnostics {
             background: transparent;
             border: 0;
             border-radius: 4px;
@@ -140,7 +141,8 @@ void applyAppStyle(QApplication &application)
 
         QPushButton#pb_min:hover,
         QPushButton#pb_max:hover,
-        QPushButton#pb_hide:hover {
+        QPushButton#pb_hide:hover,
+        QToolButton#pb_diagnostics:hover {
             background: #2A2E34;
             color: #FFFFFF;
         }

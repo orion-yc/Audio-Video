@@ -7,6 +7,7 @@
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>
@@ -22,6 +23,7 @@
 #include <QVBoxLayout>
 
 #include "system_audio_read.h"
+#include "diagnostics.h"
 
 RoomDialog::RoomDialog(QWidget *parent) :
     CustomMoveDialog(parent),
@@ -49,6 +51,19 @@ RoomDialog::RoomDialog(QWidget *parent) :
     ui->pb_min->setToolTip("最小化");
     ui->pb_max->setToolTip("最大化");
     ui->pb_close->setToolTip("退出会议");
+
+    auto *diagnosticsButton = new QToolButton(this);
+    diagnosticsButton->setObjectName("pb_diagnostics");
+    diagnosticsButton->setFixedSize(30, 30);
+    diagnosticsButton->setIcon(QIcon(QStringLiteral(":/images/sett.png")));
+    diagnosticsButton->setIconSize(QSize(18, 18));
+    diagnosticsButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    diagnosticsButton->setToolTip("打开本机诊断日志目录；日志不会自动上传");
+    const int hideButtonIndex = ui->horizontalLayout->indexOf(ui->pb_hide);
+    ui->horizontalLayout->insertWidget(hideButtonIndex + 1, diagnosticsButton);
+    connect(diagnosticsButton, &QToolButton::clicked, this, []() {
+        DiagnosticLogger::openLogDirectory();
+    });
 
     ui->horizontalLayout->insertWidget(0, m_latencyLabel);
     m_mediaStatus = new QLabel("视频未连接", this);

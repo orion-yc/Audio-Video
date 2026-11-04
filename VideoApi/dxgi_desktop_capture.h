@@ -5,6 +5,8 @@
 #include <QString>
 #include <vector>
 
+#include "../diagnostics.h"
+
 #ifdef Q_OS_WIN
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -17,7 +19,8 @@ public:
     DxgiDesktopCapture();
     ~DxgiDesktopCapture();
 
-    bool capture(const QString &outputName, QImage *image);
+    bool capture(const QString &outputName, QImage *image,
+                 DesktopCaptureTiming *timing = nullptr);
     void reset();
 
 private:

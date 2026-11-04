@@ -4,6 +4,7 @@
 #include <QIcon>
 #include "ckernal.h"
 #include "appstyle.h"
+#include "diagnostics.h"
 
 int main(int argc, char *argv[])
 {
@@ -13,6 +14,7 @@ int main(int argc, char *argv[])
     // Keep the runtime window icon consistent with the packaged executable.
     a.setWindowIcon(QIcon(QStringLiteral(":/images/app-icon.png")));
     applyAppStyle(a);
+    DiagnosticLogger::instance().initialize();
 //    demoDialog w;
 //    w.show();
     CKernal::getInstance();

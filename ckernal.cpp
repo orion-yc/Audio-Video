@@ -1,4 +1,5 @@
 #include "ckernal.h"
+#include "diagnostics.h"
 #include "userprofiledialog.h"
 #include "gateway_client.h"
 #include "rtc_session.h"
@@ -1326,6 +1327,11 @@ void CKernal::slot_deskOpen()
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Desktop;
     resetDesktopShareStats();
+    DiagnosticLogger::instance().startDesktopShare(
+                m_desktopWidth, m_desktopHeight,
+                m_desktopWidth, m_desktopHeight,
+                m_desktopFrameRate, m_desktopBitRate,
+                m_roomDialog->desktopShareScreenName());
     m_desktopStatsTimer->start();
     m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
     m_deskRead->start();
@@ -1531,6 +1537,9 @@ void CKernal::sendVideoStopFrame()
 
 void CKernal::stopLocalVideo()
 {
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        DiagnosticLogger::instance().stopDesktopShare();
+    }
     ++m_videoStreamGeneration;
     {
         std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
