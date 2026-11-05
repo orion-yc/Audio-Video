@@ -1,14 +1,14 @@
-QT       += core gui
+QT       += core gui network
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++17
 
-VERSION = 1.0.8.0
+VERSION = 2.0.0.0
 TARGET = Audio-Video
 QMAKE_TARGET_PRODUCT = Audio-Video
 QMAKE_TARGET_DESCRIPTION = Audio-Video conferencing client
-win32:RC_ICONS = images/message.ico
+win32:RC_ICONS = images/app-icon.ico
 
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.
@@ -16,20 +16,25 @@ win32:RC_ICONS = images/message.ico
 
 SOURCES += \
     ckernal.cpp \
+    diagnostics.cpp \
+    web_client.cpp \
     logindialog.cpp \
     main.cpp \
     demodialog.cpp \
     roomdialog.cpp \
     setuserdialog.cpp \
+    userprofiledialog.cpp \
     usershow.cpp \
     workthread.cpp
 
 HEADERS += \
     ckernal.h \
+    diagnostics.h \
     demodialog.h \
     logindialog.h \
     roomdialog.h \
     setuserdialog.h \
+    userprofiledialog.h \
     usershow.h \
     workthread.h
 

@@ -1,7 +1,23 @@
 #include "audio_read.h"
 
 #include <cstdint>
+#include <cmath>
 #include <cstring>
+
+namespace {
+constexpr qsizetype kPcmFrameBytes = 640;
+
+void trimPendingPcm(QByteArray &buffer, qsizetype frameBytes)
+{
+    const qsizetype maxPending = frameBytes * 5;
+    if (buffer.size() <= maxPending) {
+        return;
+    }
+    const qsizetype excess = buffer.size() - maxPending;
+    const qsizetype framesToDrop = (excess + frameBytes - 1) / frameBytes;
+    buffer.remove(0, qMin(buffer.size(), framesToDrop * frameBytes));
+}
+}
 
 Audio_Read::Audio_Read(QObject *parent)
     : QObject(parent),
@@ -9,6 +25,7 @@ Audio_Read::Audio_Read(QObject *parent)
       audio_in(nullptr),
       myBuffer_in(nullptr),
       m_recordState(audio_state::_Stop),
+      m_systemAudioEnabled(false),
       Enc_State(nullptr)
 {
     format.setSampleRate(8000);
@@ -74,21 +91,136 @@ void Audio_Read::pause()
         audio_in = nullptr;
     }
     myBuffer_in = nullptr;
+    m_micPcmPending.clear();
+    m_mixWaitTimer.invalidate();
     m_recordState = audio_state::_Pause;
+}
+
+void Audio_Read::setSystemAudioEnabled(bool enabled)
+{
+    if (m_systemAudioEnabled == enabled) {
+        return;
+    }
+    m_systemAudioEnabled = enabled;
+    if (!enabled) {
+        m_systemPcmPending.clear();
+        m_mixWaitTimer.invalidate();
+    }
+    drainMixedFrames();
+}
+
+void Audio_Read::slot_systemAudioFrame(const QByteArray &pcm)
+{
+    if (!m_systemAudioEnabled || pcm.isEmpty()) {
+        return;
+    }
+
+    m_systemPcmPending.append(pcm);
+    trimPendingPcm(m_systemPcmPending, m_pcmFrameBytes);
+    drainMixedFrames();
 }
 
 void Audio_Read::slot_readMore()
 {
-    constexpr qsizetype pcmBytes = 640;
-    if (!audio_in || !myBuffer_in || audio_in->bytesAvailable() < pcmBytes)
+    if (!audio_in || !myBuffer_in || audio_in->bytesAvailable() <= 0)
         return;
 
-    QByteArray pcm(pcmBytes, 0);
-    if (myBuffer_in->read(pcm.data(), pcmBytes) != pcmBytes)
+    const qint64 available = audio_in->bytesAvailable();
+    const qint64 readSize = qMin(available, static_cast<qint64>(m_pcmFrameBytes * 5));
+    if (readSize <= 0)
         return;
+
+    const QByteArray pcm = myBuffer_in->read(readSize);
+    if (pcm.isEmpty())
+        return;
+
+    m_micPcmPending.append(pcm);
+    trimPendingPcm(m_micPcmPending, m_pcmFrameBytes);
+    drainMixedFrames();
+}
+
+void Audio_Read::drainMixedFrames()
+{
+    const qsizetype frameBytes = m_pcmFrameBytes;
+    const bool micEnabled = m_recordState == audio_state::_Record;
+    const bool systemEnabled = m_systemAudioEnabled;
+    if (!micEnabled && !systemEnabled) {
+        return;
+    }
+
+    while (true) {
+        const bool hasMic = micEnabled && m_micPcmPending.size() >= frameBytes;
+        const bool hasSystem = systemEnabled && m_systemPcmPending.size() >= frameBytes;
+        if (!hasMic && !hasSystem) {
+            return;
+        }
+        // Keep the two live sources in the same 20 ms transport frame. When
+        // both controls are enabled, wait for both sides instead of emitting
+        // two sequential frames (which would play back at double speed).
+        if (micEnabled && systemEnabled && (!hasMic || !hasSystem)) {
+            if (!m_mixWaitTimer.isValid()) {
+                m_mixWaitTimer.start();
+            }
+            // A faulty/permission-denied input must not silence the system
+            // stream forever. After a short grace period, zero-fill the
+            // missing side until it catches up.
+            if (m_mixWaitTimer.elapsed() < 100) {
+                return;
+            }
+        } else {
+            m_mixWaitTimer.invalidate();
+        }
+
+        QByteArray mixed(frameBytes, 0);
+        const QByteArray micFrame = hasMic ? m_micPcmPending.left(frameBytes) : QByteArray();
+        const QByteArray systemFrame = hasSystem ? m_systemPcmPending.left(frameBytes)
+                                                  : QByteArray();
+        if (hasMic) {
+            m_micPcmPending.remove(0, frameBytes);
+        }
+        if (hasSystem) {
+            m_systemPcmPending.remove(0, frameBytes);
+        }
+
+        const int sampleCount = static_cast<int>(frameBytes / sizeof(std::int16_t));
+        const bool attenuate = hasMic && hasSystem;
+        for (int index = 0; index < sampleCount; ++index) {
+            std::int16_t micSample = 0;
+            std::int16_t systemSample = 0;
+            if (hasMic) {
+                std::memcpy(&micSample, micFrame.constData() + index * sizeof(micSample),
+                            sizeof(micSample));
+            }
+            if (hasSystem) {
+                std::memcpy(&systemSample,
+                            systemFrame.constData() + index * sizeof(systemSample),
+                            sizeof(systemSample));
+            }
+            int value = static_cast<int>(micSample) + static_cast<int>(systemSample);
+            if (attenuate) {
+                value = static_cast<int>(std::lround(value * 0.70710678));
+            }
+            value = qBound(-32768, value, 32767);
+            const auto output = static_cast<std::int16_t>(value);
+            std::memcpy(mixed.data() + index * sizeof(output), &output, sizeof(output));
+        }
+        encodeAndEmit(mixed);
+        if (!micEnabled || !systemEnabled || (hasMic && hasSystem)) {
+            m_mixWaitTimer.invalidate();
+        }
+    }
+}
+
+void Audio_Read::encodeAndEmit(const QByteArray &pcm)
+{
+    if (m_pcmMode) { Q_EMIT SIG_pcmFrame(pcm); return; }
+    if (pcm.size() < kPcmFrameBytes) {
+        return;
+    }
 
 #ifndef USE_SPEEX
-    Q_EMIT SIG_audioFrame(pcm);
+    QByteArray frame = pcm;
+    Q_EMIT SIG_audioFrame(frame);
 #else
     if (!Enc_State)
         return;
@@ -115,4 +247,14 @@ void Audio_Read::slot_readMore()
 
     Q_EMIT SIG_audioFrame(encoded);
 #endif
+}
+
+void Audio_Read::setPcmMode(bool enabled)
+{
+    if (m_recordState == audio_state::_Record) return;
+    m_pcmMode = enabled;
+    format.setSampleRate(enabled ? 48000 : 8000);
+    m_pcmFrameBytes = enabled ? 1920 : 640;
+    m_micPcmPending.clear();
+    m_systemPcmPending.clear();
 }

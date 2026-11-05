@@ -1,4 +1,8 @@
 #include "ckernal.h"
+#include "diagnostics.h"
+#include "userprofiledialog.h"
+#include "gateway_client.h"
+#include "rtc_session.h"
 #include <QDebug>
 #include <QCryptographicHash>
 #include <QMessageBox>
@@ -10,7 +14,7 @@
 // 协议映射关系
 void CKernal::setNetMap()
 {
-    memset( m_netMap, 0, sizeof(PFUN));
+    memset(m_netMap, 0, sizeof(m_netMap));
     // m_netMap[_DEF_PACK_LOGIN_RS - _DEF_PROTOCOL_BASE ] = &CKernal::slot_dealLoginRs;
     NetMap(DEF_PACK_LOGIN_RS)       = &CKernal::slot_dealLoginRs;
     NetMap(DEF_PACK_REGISTER_RS)    = &CKernal::slot_dealRegisterRs;
@@ -27,6 +31,7 @@ void CKernal::setNetMap()
     NetMap(DEF_PACK_VIDEO_FRAME)  = &CKernal::slot_dealVideoFrame;
     NetMap(DEF_PACK_AVATAR_UPLOAD_RS) = &CKernal::slot_dealAvatarUploadRs;
     NetMap(DEF_PACK_AVATAR_DATA_RS) = &CKernal::slot_dealAvatarDataRs;
+    NetMap(DEF_PACK_ROOM_CHAT_MESSAGE) = &CKernal::slot_dealRoomChatMessage;
 
 }
 
@@ -41,9 +46,13 @@ namespace {
 constexpr int kMinimumRoomId = 100000;
 constexpr int kMaximumRoomId = 999999;
 constexpr int kRoomRequestTimeoutMs = 8000;
+constexpr int kAvChannelReconnectIntervalMs = 1000;
+constexpr int kLegacyAvRegistrationFallbackMs = 1500;
 constexpr qint64 kDesktopReferencePixelsPerSecond =
         static_cast<qint64>(DESKTOP_IMAGE_WIDTH) * DESKTOP_IMAGE_HEIGHT * DESKTOP_FRAME_RATE;
 constexpr qint64 kMinimumDesktopVideoBitRate = 6 * 1000 * 1000;
+const std::chrono::milliseconds kMaximumQueuedVideoAge(250);
+constexpr int kDesktopStallIntervalsBeforeRecovery = 5;
 
 bool isValidRoomId(int roomId)
 {
@@ -112,7 +121,10 @@ void CKernal::initConfig()
         settings.setValue("port", m_serverPort);
         settings.endGroup();
     }
-    qDebug() << m_serverIP << m_serverPort;
+    m_useWebRtc = settings.value("Net/transport", "webrtc").toString() != "tcp";
+    m_gatewayUrl = settings.value("Net/gateway", "https://video.onnotify.top").toString();
+    m_liveKitUrl = settings.value("Net/livekit", "wss://video.onnotify.top").toString();
+    qDebug() << (m_useWebRtc ? m_gatewayUrl : m_serverIP);
 
 
 
@@ -121,7 +133,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_controlSocket(new QTcpSocket(this))
   ,m_controlReconnectTimer(new QTimer(this))
   ,m_userid(0), m_roomid(0), m_loggedIn(false), m_shuttingDown(false)
-  ,m_userIconId(0), m_sendVideoThread(new SendThread)
+  ,m_userIconId(0), m_userProfileDialog(nullptr), m_sendVideoThread(new SendThread)
   ,m_videoEncodeThread(new VideoEncodeThread)
   ,m_videoEncodeBusy(false)
   ,m_videoStreamGeneration(0)
@@ -130,6 +142,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
   ,m_desktopHeight(DESKTOP_IMAGE_HEIGHT)
   ,m_desktopFrameRate(DESKTOP_FRAME_RATE)
   ,m_desktopBitRate(DESKTOP_VIDEO_BITRATE)
+  ,m_desktopStatsTimer(new QTimer(this))
   ,m_latencySocket(new QTcpSocket(this))
     ,m_latencyTimer(new QTimer(this))
     ,m_latencyTimeoutTimer(new QTimer(this))
@@ -147,6 +160,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     ,m_pendingRoomId(0)
 {
     memset(m_sessionToken, 0, sizeof(m_sessionToken));
+    m_videoUiClock.start();
     // 设置协议映射关系
     setNetMap();
     initConfig();
@@ -193,11 +207,24 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     m_controlReconnectTimer->setInterval(1500);
     connect(m_controlReconnectTimer, &QTimer::timeout,
             this, &CKernal::slot_controlReconnect);
+    for (int channel = 0; channel < 2; ++channel) {
+        m_avReconnectTimers[channel] = new QTimer(this);
+        m_avReconnectTimers[channel]->setSingleShot(true);
+        m_avReconnectTimers[channel]->setInterval(kAvChannelReconnectIntervalMs);
+        connect(m_avReconnectTimers[channel], &QTimer::timeout, this,
+                [this, channel]() { retryAvChannel(channel); });
+        m_avRegistrationFallbackTimers[channel] = new QTimer(this);
+        m_avRegistrationFallbackTimers[channel]->setSingleShot(true);
+        m_avRegistrationFallbackTimers[channel]->setInterval(kLegacyAvRegistrationFallbackMs);
+        connect(m_avRegistrationFallbackTimers[channel], &QTimer::timeout, this,
+                [this, channel]() { allowLegacyAvRegistration(channel); });
+    }
     ensureControlConnection();
 
     m_loginDialog->show();
 
     m_roomDialog = new RoomDialog;
+    m_userProfileDialog = new UserProfileDialog(m_roomDialog);
     connect(m_roomDialog, SIGNAL(SIG_quitRoom())
             , this, SLOT(slot_quitRoom()));
     m_setUserDialog = new SetUserDialog;
@@ -206,6 +233,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_userSetCommit);
 
     m_audioRead = new Audio_Read;
+    m_systemAudioRead = new SystemAudio_Read;
 
     m_videoRead = new Video_Read;
 
@@ -215,9 +243,19 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             m_roomDialog, &RoomDialog::slot_setCaptureState);
 
     m_deskRead  = new Desk_Read;
+    m_deskRead->setCaptureScreenName(m_roomDialog->desktopShareScreenName());
 
     connect(m_audioRead, SIGNAL(SIG_audioFrame(QByteArray&)),
             this, SLOT(slot_sendAudioFrame(QByteArray&)));
+    connect(m_systemAudioRead, &SystemAudio_Read::SIG_audioFrame,
+            m_audioRead, &Audio_Read::slot_systemAudioFrame, Qt::QueuedConnection);
+    connect(m_systemAudioRead, &SystemAudio_Read::SIG_captureError,
+            this, [this](const QString &message) {
+        qWarning() << "System audio capture:" << message;
+        if (m_roomDialog) {
+            m_roomDialog->slot_setSystemAudioError(message);
+        }
+    });
 
     connect(m_videoRead, SIGNAL(SIG_videoFrame(QImage)),
             this, SLOT(slot_refleshCameraVideoImage(QImage)));
@@ -233,6 +271,10 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_audioOpen()));
     connect(m_roomDialog, SIGNAL(SIG_audioClose()),
             this, SLOT(slot_audioClose()));
+    connect(m_roomDialog, &RoomDialog::SIG_systemAudioStateChanged,
+            this, &CKernal::slot_systemAudioStateChanged);
+    connect(m_roomDialog, &RoomDialog::SIG_systemAudioDeviceChanged,
+            this, &CKernal::slot_systemAudioDeviceChanged);
 
     connect(m_roomDialog, SIGNAL(SIG_captureOpen()),
             this, SLOT(slot_captureOpen()));
@@ -245,12 +287,19 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, SLOT(slot_deskClose()));
     connect(m_roomDialog, SIGNAL(SIG_desktopShareSettingsChanged(int,int,int)),
             this, SLOT(slot_setDesktopShareSettings(int,int,int)));
+    connect(m_roomDialog, &RoomDialog::SIG_desktopShareScreenChanged,
+            this, &CKernal::slot_setDesktopShareScreen);
 
     connect(m_roomDialog, SIGNAL(SIG_setFunnyPic(int)),
             this, SLOT(slot_setFunnyPic(int)));
+    connect(m_roomDialog, &RoomDialog::SIG_chatMessageSend,
+            this, &CKernal::slot_sendRoomChatMessage);
+    connect(m_roomDialog, &RoomDialog::SIG_chatUserRequested,
+            this, &CKernal::slot_showRoomMemberProfile);
 
     connect(this, &CKernal::SIG_sendVideoFrame,
-            m_sendVideoThread.get(), &SendThread::slot_threadSendData);
+            m_sendVideoThread.get(), &SendThread::slot_queueLatestFrame,
+            Qt::DirectConnection);
     connect(this, &CKernal::SIG_encodeVideoFrame,
             m_videoEncodeThread.get(), &VideoEncodeThread::slot_encodeFrame);
     connect(this, &CKernal::SIG_resetVideoEncoder,
@@ -260,11 +309,28 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
     connect(m_videoEncodeThread.get(), &VideoEncodeThread::SIG_encodeFinished,
             this, &CKernal::slot_videoEncodeFinished);
 
+    m_videoDecodeThread = new QThread(this);
+    m_videoDecodeWorker = new VideoDecodeWorker;
+    m_videoDecodeWorker->moveToThread(m_videoDecodeThread);
+    connect(m_videoDecodeThread, &QThread::finished,
+            m_videoDecodeWorker, &QObject::deleteLater);
+    connect(m_videoDecodeWorker, &VideoDecodeWorker::SIG_frameDecoded,
+            this, &CKernal::slot_videoFrameDecoded, Qt::QueuedConnection);
+    m_videoDecodeThread->start();
+
+    m_desktopStatsTimer->setInterval(1000);
+    connect(m_desktopStatsTimer, &QTimer::timeout,
+            this, &CKernal::slot_updateDesktopShareStats);
+
     m_latencyTimer->setInterval(5000);
     m_latencyTimeoutTimer->setSingleShot(true);
     m_latencyTimeoutTimer->setInterval(1500);
     m_loginTimeoutTimer->setSingleShot(true);
     m_loginTimeoutTimer->setInterval(6000);
+    m_loginDeadline = new QTimer(this);
+    m_loginDeadline->setSingleShot(true);
+    m_loginDeadline->setInterval(20000);
+    connect(m_loginDeadline, &QTimer::timeout, this, &CKernal::failLogin);
     m_roomRequestTimer->setSingleShot(true);
     m_roomRequestTimer->setInterval(kRoomRequestTimeoutMs);
     connect(m_latencyTimer, &QTimer::timeout,
@@ -279,6 +345,7 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             this, &CKernal::slot_latencyError);
     connect(m_loginTimeoutTimer, &QTimer::timeout,
             this, &CKernal::slot_loginTimeout);
+    if (m_useWebRtc) setupWebRtc();
     m_latencyTimer->start();
     QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
@@ -296,17 +363,32 @@ void CKernal::slot_destroy()
 {
     qDebug() <<  __func__;
     m_shuttingDown = true;
+    if (m_gateway) { m_gateway->leaveRoom(); m_gateway->logout(); }
+    delete m_rtc; m_rtc = nullptr;
+    m_avChannelRegistered[0].store(false);
+    m_avChannelRegistered[1].store(false);
+    m_loginDeadline->stop();
     m_latencyTimer->stop();
     m_latencyTimeoutTimer->stop();
     m_loginTimeoutTimer->stop();
     m_roomRequestTimer->stop();
     m_controlReconnectTimer->stop();
+    for (QTimer *timer : m_avReconnectTimers) {
+        if (timer) {
+            timer->stop();
+        }
+    }
     m_latencyProbeActive = false;
     m_loginPending = false;
     m_roomRequest = RoomRequest::None;
     m_pendingRoomId = 0;
     m_latencySocket->abort();
     m_controlSocket->abort();
+    if (m_systemAudioRead) {
+        m_systemAudioRead->stopCapture();
+        delete m_systemAudioRead;
+        m_systemAudioRead = nullptr;
+    }
     for (TcpClientMediator*& channel : m_tcpAV) {
         if (channel) {
             channel->CloseNet();
@@ -340,10 +422,20 @@ void CKernal::slot_destroy()
         delete m_deskRead; m_deskRead = NULL;
     }
     m_videoEncodeThread.reset();
+    if (m_videoDecodeThread && m_videoDecodeThread->isRunning()) {
+        if (m_videoDecodeWorker) {
+            QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetAll",
+                                      Qt::BlockingQueuedConnection);
+        }
+        m_videoDecodeThread->quit();
+        m_videoDecodeThread->wait(1000);
+        m_videoDecodeWorker = nullptr;
+    }
 }
 
 void CKernal::slot_measureLatency()
 {
+    if (m_useWebRtc) { if (m_gateway && m_loggedIn) m_gateway->ping(); return; }
     // Login owns the only server connection until the main control socket has
     // authenticated. Do not let a probe race the login connection.
     if (!m_loggedIn || m_loginPending) {
@@ -505,7 +597,10 @@ void CKernal::slot_dealAudioChannelData(uint socket, char *buf, int nlen)
     }
     int type = 0;
     memcpy(&type, buf, sizeof(type));
-    if (type == DEF_PACK_AUDIO_FRAME) {
+    if (type == DEF_PACK_AUDIO_REGISTER_RS) {
+        handleMediaRegistration(0, buf, nlen);
+        delete[] buf;
+    } else if (type == DEF_PACK_AUDIO_FRAME && m_avChannelRegistered[0].load()) {
         slot_dealData(socket, buf, nlen);
     } else {
         delete[] buf;
@@ -520,7 +615,13 @@ void CKernal::slot_dealVideoChannelData(uint socket, char *buf, int nlen)
     }
     int type = 0;
     memcpy(&type, buf, sizeof(type));
-    if (type == DEF_PACK_VIDEO_FRAME) {
+    if (type == DEF_PACK_VIDEO_REGISTER_RS) {
+        handleMediaRegistration(1, buf, nlen);
+        delete[] buf;
+    } else if (type == DEF_PACK_VIDEO_KEYFRAME_RQ) {
+        handleVideoKeyFrameRequest(buf, nlen);
+        delete[] buf;
+    } else if (type == DEF_PACK_VIDEO_FRAME && m_avChannelRegistered[1].load()) {
         slot_dealData(socket, buf, nlen);
     } else {
         delete[] buf;
@@ -552,6 +653,8 @@ void CKernal::slot_dealData(uint socket, char *buf, int nlen)
 void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
 {
     Q_UNUSED(socket);
+    if (!m_loginPending) return;
+    m_loginDeadline->stop();
     // Every 10003 response, including a failure response, ends the pending UI
     // state. The control receive buffer has already assembled the outer frame.
     m_loginTimeoutTimer->stop();
@@ -615,6 +718,20 @@ void CKernal::slot_dealLoginRs(uint socket, char *buf, int nlen)
     // Audio and video have their own channels. They receive the same complete
     // token only after the control connection has authenticated this user.
     ensureAvConnections();
+    // Reauthentication creates a new server session with no room membership.
+    // Rejoin explicitly instead of keeping a room UI that cannot receive media.
+    if (m_roomid != 0) {
+        const int previousRoom = m_roomid;
+        slot_quitRoom();
+        STRU_JOINROOM_RQ request;
+        request.m_UserID = m_userid;
+        request.m_RoomID = previousRoom;
+        beginRoomRequest(RoomRequest::Join, previousRoom);
+        if (!slot_clientSendData(0, reinterpret_cast<char*>(&request), sizeof(request))) {
+            clearRoomRequest();
+            m_demoDialog->slot_setPushButton_enable(true);
+        }
+    }
     QTimer::singleShot(0, this, &CKernal::slot_measureLatency);
 }
 
@@ -708,6 +825,38 @@ void CKernal::slot_dealRoomMemberRq(uint socket, char *buf, int nlen)
     ensureRemoteParticipant(rq->m_UserID, QString::fromStdString(rq->m_szUser));
 }
 
+void CKernal::slot_dealRoomChatMessage(uint socket, char *buf, int nlen)
+{
+    Q_UNUSED(socket);
+    if (nlen != static_cast<int>(sizeof(STRU_ROOM_CHAT_MESSAGE)) || m_roomid == 0) {
+        return;
+    }
+
+    const auto *message = reinterpret_cast<const STRU_ROOM_CHAT_MESSAGE *>(buf);
+    if (message->m_RoomID != m_roomid || message->m_UserID <= 0 ||
+            message->m_messageLength <= 0 ||
+            message->m_messageLength > DEF_ROOM_CHAT_MAX_BYTES ||
+            message->m_UserID == m_userid) {
+        return;
+    }
+
+    const QString text = QString::fromUtf8(message->m_message, message->m_messageLength).trimmed();
+    if (text.isEmpty()) {
+        return;
+    }
+
+    QString senderName;
+    const auto participant = m_mapIDToUserShow.find(message->m_UserID);
+    if (participant != m_mapIDToUserShow.end()) {
+        senderName = participant->second->m_name;
+    }
+    if (senderName.isEmpty()) {
+        senderName = QString("用户%1").arg(message->m_UserID);
+    }
+    ensureRemoteParticipant(message->m_UserID, senderName);
+    m_roomDialog->slot_appendChatMessage(message->m_UserID, senderName, text, false);
+}
+
 void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
 {
     Q_UNUSED(socket);
@@ -720,6 +869,7 @@ void CKernal::slot_dealUserInfoRq(uint socket, char *buf, int nlen)
     m_name = QString::fromStdString(rq->m_szUser);
     m_userIconId = qBound(0, rq->m_iconid, 35);
     const QString feeling = QString::fromStdString(rq->m_userFeeling);
+    m_userFeeling = feeling;
 
     m_demoDialog->slot_setInfo(m_name, m_userIconId);
     m_setUserDialog->slot_setInfo(m_userIconId, m_name, feeling);
@@ -879,6 +1029,9 @@ void CKernal::slot_dealAvatarDataRs(uint socket, char *buf, int nlen)
         user->second->slot_setAvatarImage(avatar);
     }
     m_roomDialog->slot_setBigAvatar(rs->m_TargetUserID, avatar);
+    if (m_userProfileDialog && m_userProfileDialog->userId() == rs->m_TargetUserID) {
+        m_userProfileDialog->slot_setAvatar(avatar);
+    }
 }
 
 void CKernal::slot_dealLeaveRoomRq(uint socket, char *buf, int nlen)
@@ -901,11 +1054,16 @@ void CKernal::slot_dealLeaveRoomRq(uint socket, char *buf, int nlen)
 
 void CKernal::slot_setJoinedRoom(int roomid)
 {
-    if (!isValidRoomId(roomid)) {
+    if (!m_useWebRtc && !isValidRoomId(roomid)) {
         return;
     }
     clearRoomRequest();
     m_roomid = roomid;
+    m_remoteVideoGeneration.fetch_add(1);
+    if (m_videoDecodeWorker) {
+        QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetAll",
+                                  Qt::QueuedConnection);
+    }
     // 可以写成原界面隐藏 或者按钮失效
     // m_demoDialog->hide();    按键变会代替窗口隐藏
     m_demoDialog->slot_setPushButton_enable(false);
@@ -914,6 +1072,7 @@ void CKernal::slot_setJoinedRoom(int roomid)
     // 初始化状态 清空等操作 可以复用
     // todo
     m_roomDialog->slot_setRoomID(roomid);
+    if (m_useWebRtc) m_roomDialog->slot_setRoomName(m_webRoomName);
     const QImage ownAvatar = m_userAvatar.isNull()
             ? builtInAvatar(m_userIconId) : m_userAvatar;
     UserShow *user = nullptr;
@@ -931,6 +1090,10 @@ void CKernal::slot_setJoinedRoom(int roomid)
     }
     user->slot_setAvatarImage(ownAvatar);
     m_roomDialog->slot_setBigUser(m_userid, m_name, ownAvatar);
+    // The server keeps audio and video subscriptions on dedicated sockets.
+    // Re-register both when entering a room so a viewer never depends on a
+    // connection created before the room join.
+    ensureAvConnections(true);
 }
 
 // 弹出框
@@ -954,6 +1117,7 @@ void CKernal::slot_userSetCommit(int iconid, QString name, QString feeling,
 
 void CKernal::requestAvatar(int targetUserId)
 {
+    if (m_useWebRtc) { if (targetUserId > 0 && m_gateway->authenticated()) m_gateway->fetchAvatar(targetUserId); return; }
     if (targetUserId <= 0 || !hasAuthenticatedControlConnection() ||
             !hasValidSessionToken(m_sessionToken)) {
         return;
@@ -968,6 +1132,7 @@ void CKernal::requestAvatar(int targetUserId)
 
 bool CKernal::sendAvatarUpload(const QByteArray &avatarData)
 {
+    if (m_useWebRtc) { m_gateway->uploadAvatar(avatarData); return m_gateway->authenticated(); }
     if (!hasAuthenticatedControlConnection() || !hasValidSessionToken(m_sessionToken) ||
             avatarData.size() > DEF_AVATAR_IMAGE_MAX_SIZE ||
             (!avatarData.isEmpty() && !hasJpegSignature(avatarData))) {
@@ -1002,14 +1167,28 @@ void CKernal::slot_quitRoom()
         m_demoDialog->showNormal();
         return;
     }
+
+    // Stop on the video channel while the current room id is still valid.
+    // Resetting the room id first used to suppress the final stop frame and
+    // could leave the next room with a stale local sharing state.
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        m_deskRead->pause();
+        stopLocalVideo();
+    } else if (m_activeVideoSource == VideoSource::Camera) {
+        m_videoRead->pause();
+        stopLocalVideo();
+    }
+
     // 发包
     STRU_LEAVEROOM_RQ rq;
     rq.m_nUserId = m_userid;
     rq.m_RoomId = m_roomid;
 
-    slot_clientSendData(0, (char*)&rq, sizeof(rq));
+    if (m_useWebRtc) { m_gateway->leaveRoom(); m_rtc->stop(); m_webRoomName.clear(); }
+    else slot_clientSendData(0, (char*)&rq, sizeof(rq));
 
     m_roomid = 0;
+    m_remoteVideoGeneration.fetch_add(1);
     m_demoDialog->slot_setPushButton_enable(true);
     // 声音关闭 ui 后台
     m_roomDialog->slot_setRoomClear();
@@ -1078,8 +1257,32 @@ void CKernal::slot_audioClose()
     m_audioRead->pause();
 }
 
+void CKernal::slot_systemAudioStateChanged(bool enabled)
+{
+    if (!m_audioRead || !m_systemAudioRead) {
+        return;
+    }
+    m_audioRead->setSystemAudioEnabled(enabled);
+    if (enabled) {
+        m_systemAudioRead->startCapture();
+    } else {
+        m_systemAudioRead->stopCapture();
+    }
+}
+
+void CKernal::slot_systemAudioDeviceChanged(const QString &deviceId)
+{
+    if (m_systemAudioRead) {
+        m_systemAudioRead->setDeviceId(deviceId);
+    }
+}
+
 void CKernal::slot_captureOpen()
 {
+    slot_systemAudioStateChanged(false);
+    if (m_roomDialog) {
+        m_roomDialog->slot_setSystemAudioError(QString());
+    }
     if (m_activeVideoSource == VideoSource::Camera) {
         return;
     }
@@ -1089,6 +1292,7 @@ void CKernal::slot_captureOpen()
     }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Camera;
+    m_roomDialog->slot_clearDesktopShareStatus();
     m_videoRead->start();
 }
 
@@ -1105,21 +1309,42 @@ void CKernal::slot_deskOpen()
     if (m_activeVideoSource == VideoSource::Desktop) {
         return;
     }
+    if (m_roomid == 0) {
+        m_roomDialog->slot_setMediaStatus("请先加入房间后再共享桌面");
+        return;
+    }
     if (m_activeVideoSource == VideoSource::Camera) {
         m_videoRead->pause();
         stopLocalVideo();
     }
+    // Refresh the server-side video-socket association for every new share.
+    // This repairs a channel which remained TCP-connected but lost its media
+    // registration after a prior room leave or a server-side queue reset.
+    if (!ensureAvChannelReady(1, true)) {
+        m_roomDialog->slot_setMediaStatus("视频通道重连中，桌面共享将自动恢复…");
+        scheduleAvChannelRecovery(1);
+    }
     Q_EMIT SIG_resetVideoEncoder();
     m_activeVideoSource = VideoSource::Desktop;
+    resetDesktopShareStats();
+    DiagnosticLogger::instance().startDesktopShare(
+                m_desktopWidth, m_desktopHeight,
+                m_desktopWidth, m_desktopHeight,
+                m_desktopFrameRate, m_desktopBitRate,
+                m_roomDialog->desktopShareScreenName());
+    m_desktopStatsTimer->start();
+    m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
     m_deskRead->start();
 }
 
 void CKernal::slot_deskClose()
 {
+    slot_systemAudioStateChanged(false);
     m_deskRead->pause();
     if (m_activeVideoSource == VideoSource::Desktop) {
         stopLocalVideo();
     }
+    m_roomDialog->slot_clearDesktopShareStatus();
 }
 
 int CKernal::desktopShareBitRate(int width, int height, int frameRate) const
@@ -1151,8 +1376,82 @@ void CKernal::slot_setDesktopShareSettings(int width, int height, int frameRate)
     m_deskRead->setCaptureSettings(width, height, frameRate);
 
     if (changed && m_activeVideoSource == VideoSource::Desktop) {
+        resetDesktopShareStats();
+        m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
         Q_EMIT SIG_resetVideoEncoder();
     }
+}
+
+void CKernal::slot_setDesktopShareScreen(const QString &screenName)
+{
+    if (!m_deskRead || screenName.isEmpty()) {
+        return;
+    }
+    m_deskRead->setCaptureScreenName(screenName);
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        resetDesktopShareStats();
+        m_roomDialog->slot_setDesktopSharePending(m_desktopFrameRate, m_desktopBitRate);
+        Q_EMIT SIG_resetVideoEncoder();
+    }
+}
+
+void CKernal::slot_sendRoomChatMessage(const QString &message)
+{
+    if (m_useWebRtc) { if (m_roomid) m_gateway->sendChat(message); return; }
+    if (m_roomid == 0 || !hasAuthenticatedControlConnection()) {
+        return;
+    }
+
+    const QString normalizedMessage = message.trimmed();
+    const QByteArray messageUtf8 = normalizedMessage.toUtf8();
+    if (messageUtf8.isEmpty() || messageUtf8.size() > DEF_ROOM_CHAT_MAX_BYTES) {
+        QMessageBox::warning(m_roomDialog, "提示", "消息不能为空且不能超过 512 个字节");
+        return;
+    }
+
+    STRU_ROOM_CHAT_MESSAGE packet;
+    packet.m_RoomID = m_roomid;
+    packet.m_UserID = m_userid;
+    packet.m_messageLength = messageUtf8.size();
+    memcpy(packet.m_message, messageUtf8.constData(), messageUtf8.size());
+    if (!sendControlPacket(reinterpret_cast<const char *>(&packet), sizeof(packet))) {
+        QMessageBox::warning(m_roomDialog, "提示", "消息发送失败，正在重新连接");
+        return;
+    }
+    m_roomDialog->slot_appendChatMessage(m_userid, m_name, normalizedMessage, true);
+    m_roomDialog->slot_clearChatInput();
+}
+
+void CKernal::slot_showRoomMemberProfile(int userId)
+{
+    if (!m_userProfileDialog || userId <= 0 || m_roomid == 0) {
+        return;
+    }
+
+    const bool currentUser = userId == m_userid;
+    QString name;
+    QString feeling;
+    QImage avatar;
+
+    if (currentUser) {
+        name = m_name;
+        feeling = m_userFeeling;
+        avatar = m_userAvatar.isNull() ? builtInAvatar(m_userIconId) : m_userAvatar;
+    } else {
+        const auto participant = m_mapIDToUserShow.find(userId);
+        if (participant == m_mapIDToUserShow.end()) {
+            return;
+        }
+        name = participant->second->m_name;
+        avatar = participant->second->m_avatarImg.isNull()
+                ? participant->second->m_defaultImg : participant->second->m_avatarImg;
+        requestAvatar(userId);
+    }
+
+    m_userProfileDialog->setProfile(userId, name, avatar, feeling, currentUser);
+    m_userProfileDialog->show();
+    m_userProfileDialog->raise();
+    m_userProfileDialog->activateWindow();
 }
 
 void CKernal::slot_cameraStateChanged(bool active)
@@ -1184,7 +1483,7 @@ void CKernal::ensureRemoteParticipant(int userId, const QString &name)
     }
 
     if (m_mapIDToAudioWrite.count(userId) == 0) {
-        m_mapIDToAudioWrite[userId] = new Audio_Write;
+        m_mapIDToAudioWrite[userId] = new Audio_Write(nullptr, m_useWebRtc);
     }
 }
 
@@ -1209,6 +1508,9 @@ void CKernal::applyOwnAvatar(const QImage &avatar)
 
 void CKernal::updateOwnRoomAvatar(const QImage &avatar)
 {
+    // The lobby icon is outside the room participant widgets, so update it
+    // here too when the profile/avatar fetch completes.
+    m_demoDialog->slot_setAvatarImage(avatar);
     const auto user = m_mapIDToUserShow.find(m_userid);
     if (user != m_mapIDToUserShow.end()) {
         user->second->slot_setAvatarImage(avatar);
@@ -1227,6 +1529,7 @@ void CKernal::clearUserVideo(int userId)
 
 void CKernal::sendVideoStopFrame()
 {
+    if (m_useWebRtc) { m_rtc->stopVideo(); return; }
     if (m_roomid != 0) {
         slot_sendVideoFrameData(QByteArray(), m_videoStreamGeneration);
     }
@@ -1234,12 +1537,20 @@ void CKernal::sendVideoStopFrame()
 
 void CKernal::stopLocalVideo()
 {
+    if (m_activeVideoSource == VideoSource::Desktop) {
+        DiagnosticLogger::instance().stopDesktopShare();
+    }
     ++m_videoStreamGeneration;
+    {
+        std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+        m_pendingDesktopFrame = QImage();
+    }
     m_sendVideoThread->setActiveGeneration(m_videoStreamGeneration);
     Q_EMIT SIG_resetVideoEncoder();
     clearUserVideo(m_userid);
     sendVideoStopFrame();
     m_activeVideoSource = VideoSource::None;
+    m_desktopStatsTimer->stop();
 }
 
 #include "QTime"
@@ -1324,12 +1635,22 @@ void CKernal::slot_refleshDesktopVideoImage(QImage img)
 // 用来显示用户
 void CKernal::slot_refleshUserImage(int id ,QImage &img)
 {
+    if (!m_roomDialog || img.isNull()) {
+        return;
+    }
     // 预览图 大图 显示
     m_roomDialog->slot_setBigImage(id, img);
     // 列表显示
     if(m_mapIDToUserShow.count(id) > 0){
-        UserShow* user = m_mapIDToUserShow[id];
-        user->slot_setImage(img);
+        // The stage remains real-time, while thumbnail repaints are bounded
+        // to 15 FPS so six scaled QWidget images cannot monopolize the UI.
+        const qint64 now = m_videoUiClock.elapsed();
+        qint64 &lastPaint = m_thumbnailLastPaintMs[id];
+        if (lastPaint == 0 || now - lastPaint >= 66) {
+            lastPaint = now;
+            UserShow* user = m_mapIDToUserShow[id];
+            user->slot_setImage(img);
+        }
     }
 
 }
@@ -1339,7 +1660,8 @@ void CKernal::slot_setFunnyPic(int picid)
     m_videoRead->setFunnyPic(picid);
 }
 
-void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation)
+void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation,
+                                      bool desktopContent)
 {
     ///视频数据帧
     /// 成员描述
@@ -1386,40 +1708,68 @@ void CKernal::slot_sendVideoFrameData(const QByteArray &ba, quint64 generation)
 //    slot_clientSendData(0, buf, sizeof(int)*7 + len);
 //    delete buf;
     // 替换为发送信号
-    Q_EMIT SIG_sendVideoFrame(0, buf, sizeof(int)*7 + len, generation);
+    Q_EMIT SIG_sendVideoFrame(0, buf, sizeof(int)*7 + len, generation, desktopContent);
 }
 
-void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate)
+void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
+                              bool desktopContent)
 {
-    if (m_roomid == 0 || image.isNull()) {
+    if (m_roomid == 0 || image.isNull() || (m_useWebRtc && !m_rtc->canAcceptVideo())) {
         return;
     }
 
     bool expected = false;
     if (!m_videoEncodeBusy.compare_exchange_strong(expected, true)) {
+        if (desktopContent) {
+            {
+                std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+                m_pendingDesktopFrame = image;
+            }
+            m_desktopEncoderDroppedFrames.fetch_add(1);
+        }
         return;
     }
-    Q_EMIT SIG_encodeVideoFrame(image.copy(), frameRate, bitRate,
+    // LiveKit feedback is useful for camera video, but applying every short
+    // desktop feedback update here recreates NVENC and the pre-encoded track.
+    // That caused visible cursor stalls and repeatedly lowered text quality.
+    // Keep the selected desktop quality stable for the lifetime of the track.
+    if (m_useWebRtc && m_webTargetBitrate > 0 && !desktopContent) {
+        bitRate = qMin(bitRate, m_webTargetBitrate);
+    }
+    // QImage is implicitly shared. Passing it by value keeps the worker frame
+    // alive without a full-resolution deep copy on the GUI thread.
+    Q_EMIT SIG_encodeVideoFrame(image, frameRate, bitRate, desktopContent,
                                  m_videoStreamGeneration);
 }
 
 void CKernal::slot_sendCameraVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Camera) {
-        queueVideoFrame(img, CAMERA_FRAME_RATE, CAMERA_VIDEO_BITRATE);
+        queueVideoFrame(img, CAMERA_FRAME_RATE, CAMERA_VIDEO_BITRATE, false);
     }
 }
 
 void CKernal::slot_sendDesktopVideoFrame(QImage img)
 {
     if (m_activeVideoSource == VideoSource::Desktop) {
-        queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate);
+        m_desktopCapturedFrames.fetch_add(1);
+        queueVideoFrame(img, m_desktopFrameRate, m_desktopBitRate, true);
     }
 }
 
 void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
-                                 quint64 generation)
+                                 quint64 generation, QString encoderName)
 {
+    const bool desktopContent = generation == m_videoStreamGeneration
+            && m_activeVideoSource == VideoSource::Desktop;
+    if (desktopContent
+            && width >= 2 && height >= 2) {
+        if (m_desktopEncoderName != encoderName) {
+            m_desktopEncoderName = encoderName;
+            m_roomDialog->slot_setDesktopShareStatus(width, height, m_desktopFrameRate,
+                                                      m_desktopBitRate, encoderName);
+        }
+    }
     if (generation != m_videoStreamGeneration || m_roomid == 0 || encoded.isEmpty() ||
             width < 2 || height < 2) {
         return;
@@ -1431,6 +1781,13 @@ void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int h
         return;
     }
 
+    if (m_useWebRtc) {
+        if (desktopContent) m_desktopEncodedFrames.fetch_add(1);
+        m_rtc->publishH264(encoded, flags & H264_PAYLOAD_FLAG_KEYFRAME, width, height,
+                          desktopContent ? m_desktopFrameRate : CAMERA_FRAME_RATE,
+                          desktopContent ? m_desktopBitRate : CAMERA_VIDEO_BITRATE, desktopContent);
+        return;
+    }
     H264PayloadHeader header = {};
     header.magic = H264_PAYLOAD_MAGIC;
     header.version = H264_PAYLOAD_VERSION;
@@ -1441,12 +1798,106 @@ void CKernal::slot_sendH264Frame(QByteArray encoded, int flags, int width, int h
 
     QByteArray payload(reinterpret_cast<const char *>(&header), sizeof(header));
     payload.append(encoded);
-    slot_sendVideoFrameData(payload, generation);
+    if (desktopContent) {
+        m_desktopEncodedFrames.fetch_add(1);
+    }
+    slot_sendVideoFrameData(payload, generation, desktopContent);
 }
 
 void CKernal::slot_videoEncodeFinished()
 {
     m_videoEncodeBusy.store(false);
+
+    QImage pending;
+    {
+        std::lock_guard<std::mutex> locker(m_pendingDesktopFrameMutex);
+        pending = std::move(m_pendingDesktopFrame);
+    }
+    if (!pending.isNull() && m_activeVideoSource == VideoSource::Desktop &&
+            m_roomid != 0) {
+        queueVideoFrame(pending, m_desktopFrameRate, m_desktopBitRate, true);
+    }
+}
+
+void CKernal::resetDesktopShareStats()
+{
+    m_desktopCapturedFrames.store(0);
+    m_desktopEncodedFrames.store(0);
+    m_desktopEncoderDroppedFrames.store(0);
+    m_desktopEncoderName.clear();
+    m_desktopNoCaptureIntervals = 0;
+    m_desktopNoEncodeIntervals = 0;
+    m_desktopNoSendIntervals = 0;
+    quint64 sent = 0;
+    quint64 replaced = 0;
+    quint64 late = 0;
+    quint64 failed = 0;
+    m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
+    if (m_useWebRtc) sent = m_webSentFrames.exchange(0);
+}
+
+void CKernal::slot_updateDesktopShareStats()
+{
+    if (m_activeVideoSource != VideoSource::Desktop || !m_roomDialog) {
+        return;
+    }
+
+    quint64 sent = 0;
+    quint64 replaced = 0;
+    quint64 late = 0;
+    quint64 failed = 0;
+    m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
+
+    const quint64 captured = m_desktopCapturedFrames.exchange(0);
+    const quint64 encoded = m_desktopEncodedFrames.exchange(0);
+    const quint64 encoderDropped = m_desktopEncoderDroppedFrames.exchange(0);
+    const quint64 dropped = encoderDropped + replaced + late + failed;
+    m_roomDialog->slot_setDesktopShareRuntimeStats(
+                m_desktopWidth, m_desktopHeight, m_desktopFrameRate,
+                m_desktopBitRate,
+                m_desktopEncoderName.isEmpty() ? QStringLiteral("等待编码器")
+                                                : m_desktopEncoderName,
+                static_cast<int>(captured), static_cast<int>(encoded),
+                static_cast<int>(sent), static_cast<int>(dropped));
+
+    if (captured == 0) {
+        ++m_desktopNoCaptureIntervals;
+    } else {
+        m_desktopNoCaptureIntervals = 0;
+    }
+    if (captured > 0 && encoded == 0) {
+        ++m_desktopNoEncodeIntervals;
+    } else {
+        m_desktopNoEncodeIntervals = 0;
+    }
+    if (encoded > 0 && sent == 0) {
+        ++m_desktopNoSendIntervals;
+    } else {
+        m_desktopNoSendIntervals = 0;
+    }
+
+    if (m_desktopNoCaptureIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoCaptureIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("桌面采集停滞，正在自动恢复…");
+        m_deskRead->pause();
+        m_deskRead->start();
+        Q_EMIT SIG_resetVideoEncoder();
+    } else if (m_desktopNoEncodeIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoEncodeIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("桌面编码停滞，正在自动恢复…");
+        Q_EMIT SIG_resetVideoEncoder();
+    } else if (m_desktopNoSendIntervals >= kDesktopStallIntervalsBeforeRecovery) {
+        m_desktopNoSendIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("视频通道停滞，正在重新连接…");
+        if (m_useWebRtc) { Q_EMIT SIG_resetVideoEncoder(); return; }
+        m_avChannelRegistered[1].store(false);
+        if (m_tcpAV[1]) {
+            m_tcpAV[1]->CloseNet();
+        }
+        if (!ensureAvChannelReady(1, true)) {
+            scheduleAvChannelRecovery(1);
+        }
+    }
 }
 
 void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
@@ -1496,6 +1947,7 @@ void CKernal::slot_dealAudioFrame(uint socket, char *buf, int nlen)
 
 void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
 {
+	Q_UNUSED(socket);
     if (nlen < 7 * static_cast<int>(sizeof(int))) return;
     // 反序列化过程
     int type;
@@ -1509,6 +1961,11 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     char* tmp = buf;
     type = *(int*)tmp;
     tmp += sizeof(int);
+	Q_UNUSED(type);
+	Q_UNUSED(hour);
+	Q_UNUSED(min);
+	Q_UNUSED(sec);
+	Q_UNUSED(msec);
     userid = *(int*)tmp;
     tmp += sizeof(int);
     roomid = *(int*)tmp;
@@ -1523,6 +1980,7 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     tmp += sizeof(int);
 
     const int imageLen = nlen - 7*sizeof(int);
+    const quint64 remoteGeneration = m_remoteVideoGeneration.load();
     if (m_roomid == 0 || roomid != m_roomid) {
         return;
     }
@@ -1532,6 +1990,10 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
     if (imageLen == 0) {
         m_mapIDToVideoDecoder.erase(userid);
         clearUserVideo(userid);
+		if (m_videoDecodeWorker) {
+			QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_resetUser",
+			                          Qt::QueuedConnection, Q_ARG(int, userid));
+		}
         return;
     }
     if (imageLen >= static_cast<int>(sizeof(H264PayloadHeader))) {
@@ -1546,28 +2008,52 @@ void CKernal::slot_dealVideoFrame(uint socket, char *buf, int nlen)
                 qWarning() << "Discarding malformed H.264 video frame.";
                 return;
             }
-            auto &decoder = m_mapIDToVideoDecoder[userid];
-            if (!decoder) {
-                decoder = std::make_unique<H264Decoder>();
-            }
-            QImage decoded;
             const QByteArray encoded(tmp + sizeof(header), encodedLength);
-            if (decoder->decode(encoded, &decoded) && !decoded.isNull()) {
-                slot_refleshUserImage(userid, decoded);
-            }
+			if (m_videoDecodeWorker) {
+				QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_decodeH264",
+				                          Qt::QueuedConnection,
+				                          Q_ARG(int, userid), Q_ARG(int, roomid),
+				                          Q_ARG(quint64, remoteGeneration),
+				                          Q_ARG(QByteArray, encoded),
+				                          Q_ARG(int, static_cast<int>(header.flags)));
+			}
             return;
         }
     }
 
     // Clients before the H.264 upgrade send JPEG bytes directly after the frame header.
-    QImage img;
-    img.loadFromData((/*cosnt*/uchar*)tmp, imageLen);
+	if (m_videoDecodeWorker) {
+		const QByteArray encoded(tmp, imageLen);
+		QMetaObject::invokeMethod(m_videoDecodeWorker, "slot_decodeImage",
+		                          Qt::QueuedConnection,
+		                          Q_ARG(int, userid), Q_ARG(int, roomid),
+		                          Q_ARG(quint64, remoteGeneration),
+		                          Q_ARG(QByteArray, encoded));
+	}
+}
 
-    slot_refleshUserImage(userid, img);
+void CKernal::slot_videoFrameDecoded(int userId, int roomId, quint64 generation,
+                                     QImage image, bool decoded)
+{
+	if (m_roomid == 0 || roomId != m_roomid ||
+	        generation != m_remoteVideoGeneration.load()) {
+		return;
+	}
+	if (!decoded || image.isNull()) {
+		if (m_roomDialog) {
+			m_roomDialog->slot_setMediaStatus("等待可解码画面…");
+		}
+		return;
+	}
+	slot_refleshUserImage(userId, image);
+	if (m_roomDialog) {
+		m_roomDialog->slot_setMediaStatus("正在接收画面");
+	}
 }
 
 bool CKernal::hasAuthenticatedControlConnection() const
 {
+    if (m_useWebRtc) return m_gateway && m_gateway->authenticated() && m_loggedIn;
     return m_controlSocket &&
             m_controlSocket->state() == QAbstractSocket::ConnectedState &&
             m_loggedIn && m_userid > 0;
@@ -1615,6 +2101,7 @@ bool CKernal::sendControlPacket(const char *data, int length, bool requiresLogin
 
 void CKernal::ensureControlConnection()
 {
+    if (m_useWebRtc) return;
     if (!m_controlSocket || m_shuttingDown ||
             m_controlSocket->state() == QAbstractSocket::ConnectedState ||
             m_controlSocket->state() == QAbstractSocket::ConnectingState ||
@@ -1624,35 +2111,122 @@ void CKernal::ensureControlConnection()
     m_controlSocket->connectToHost(m_serverIP, m_serverPort);
 }
 
-void CKernal::ensureAvConnections()
+void CKernal::ensureAvConnections(bool forceRegistration)
 {
+    if (m_useWebRtc) return;
     for (int i = 0; i < 2; ++i) {
-        ensureAvChannelReady(i);
+        if (!ensureAvChannelReady(i, forceRegistration)) {
+            scheduleAvChannelRecovery(i);
+        }
     }
 }
 
-bool CKernal::ensureAvChannelReady(int channel)
+void CKernal::createAvChannel(int channel)
 {
-    if (channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
+    if (channel < 0 || channel > 1 || m_tcpAV[channel]) {
+        return;
+    }
+
+    // TcpClient receives on a native worker thread. Keep all state changes
+    // and UI work on CKernal's thread, and bind callbacks to this exact
+    // connection object. A callback from a replaced socket must never revoke
+    // the authenticated state of its replacement.
+    TcpClientMediator *connection = new TcpClientMediator;
+    m_tcpAV[channel] = connection;
+    connect(connection, &INetMediator::SIG_ReadyData, this,
+            [this, channel, connection](uint socket, char *buffer, int length) {
+        if (m_tcpAV[channel] != connection) {
+            delete[] buffer;
+            return;
+        }
+        if (channel == 0) {
+            slot_dealAudioChannelData(socket, buffer, length);
+        } else {
+            slot_dealVideoChannelData(socket, buffer, length);
+        }
+    }, Qt::QueuedConnection);
+    connect(connection, &INetMediator::SIG_disConnect, this,
+            [this, channel, connection]() {
+        if (m_tcpAV[channel] != connection || m_shuttingDown) {
+            return;
+        }
+        m_avChannelRegistered[channel].store(false);
+        m_avRegistrationPending[channel] = false;
+        if (m_avRegistrationFallbackTimers[channel]) {
+            m_avRegistrationFallbackTimers[channel]->stop();
+        }
+        scheduleAvChannelRecovery(channel);
+    }, Qt::QueuedConnection);
+}
+
+void CKernal::discardAvChannel(int channel)
+{
+    if (channel < 0 || channel > 1) {
+        return;
+    }
+
+    m_avChannelRegistered[channel].store(false);
+    m_avRegistrationPending[channel] = false;
+    if (m_avReconnectTimers[channel]) {
+        m_avReconnectTimers[channel]->stop();
+    }
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->stop();
+    }
+
+    // Clear the active pointer before closing the socket. Any queued packet
+    // or disconnect notification from this retired connection is then
+    // recognized as stale by the callbacks installed in createAvChannel().
+    TcpClientMediator *connection = m_tcpAV[channel];
+    m_tcpAV[channel] = nullptr;
+    if (connection) {
+        disconnect(connection, nullptr, this, nullptr);
+        connection->CloseNet();
+        delete connection;
+    }
+}
+
+bool CKernal::ensureAvChannelReady(int channel, bool forceRegistration)
+{
+    if (m_useWebRtc) return m_rtc && m_rtc->state() == RtcSession::State::Connected;
+    if (channel < 0 || channel > 1) return false;
+    // Connection lifecycle and Qt timers belong to the GUI thread. Video sends
+    // may originate on SendThread, which only reads the atomic ready flag.
+    if (QThread::currentThread() != thread()) {
+        if (m_avChannelRegistered[channel].load()) return true;
+        scheduleAvChannelRecovery(channel);
+        return false;
+    }
+    if (m_shuttingDown || channel < 0 || channel > 1 || !m_loggedIn || m_userid <= 0 ||
             !hasValidSessionToken(m_sessionToken)) {
         return false;
     }
 
-    if (!m_tcpAV[channel]) {
-        m_tcpAV[channel] = new TcpClientMediator;
-        if (channel == 0) {
-            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealAudioChannelData(uint,char*,int)));
-        } else {
-            connect(m_tcpAV[channel], SIGNAL(SIG_ReadyData(uint,char*,int)),
-                    this, SLOT(slot_dealVideoChannelData(uint,char*,int)));
-        }
-        connect(m_tcpAV[channel], &INetMediator::SIG_disConnect, this,
-                [this, channel]() { m_avChannelRegistered[channel].store(false); });
+    // Reusing a TCP connection whose server-side association has expired lets
+    // capture and encoding continue while every media write fails. A new
+    // share (or room entry) must therefore get a clean, authenticated socket.
+    if (forceRegistration && m_tcpAV[channel]) {
+        discardAvChannel(channel);
     }
 
+    bool createdConnection = false;
+    if (!m_tcpAV[channel]) {
+        createAvChannel(channel);
+        createdConnection = true;
+    }
     if (!m_tcpAV[channel]->IsConnected()) {
+        // A failed/disconnected mediator may still have a native receive
+        // callback in flight. Replace it instead of reconnecting through the
+        // same object so that callback cannot invalidate the new registration.
+        if (!createdConnection) {
+            discardAvChannel(channel);
+            createAvChannel(channel);
+        }
         m_avChannelRegistered[channel].store(false);
+        m_avRegistrationPending[channel] = false;
+        if (m_avRegistrationFallbackTimers[channel]) {
+            m_avRegistrationFallbackTimers[channel]->stop();
+        }
         m_tcpAV[channel]->CloseNet();
         if (!m_tcpAV[channel]->OpenNet(m_serverIP.toStdString().c_str(), m_serverPort)) {
             qWarning() << "Unable to reconnect" << (channel == 0 ? "audio" : "video")
@@ -1661,10 +2235,19 @@ bool CKernal::ensureAvChannelReady(int channel)
         }
     }
 
-    if (m_avChannelRegistered[channel].load()) {
+    if (m_avChannelRegistered[channel].load() && !forceRegistration) {
         return true;
     }
 
+    if (m_avRegistrationPending[channel]) {
+        return false;
+    }
+
+    m_avChannelRegistered[channel].store(false);
+    // A new server confirms the media association with 10021/10022. Do not
+    // send H.264 before that confirmation: the first IDR could otherwise be
+    // lost, leaving a receiver waiting forever for a decodable frame.
+    if (channel == 1) m_roomDialog->slot_setMediaStatus("视频通道认证中…");
     bool registered = false;
     if (channel == 0) {
         STRU_AUDIO_REGISTER request;
@@ -1680,12 +2263,65 @@ bool CKernal::ensureAvChannelReady(int channel)
                                                 sizeof(request));
     }
 
-    m_avChannelRegistered[channel].store(registered);
     if (!registered) {
+        m_avChannelRegistered[channel].store(false);
         qWarning() << "Unable to register" << (channel == 0 ? "audio" : "video")
                    << "channel.";
+        scheduleAvChannelRecovery(channel);
+        return false;
     }
-    return registered;
+
+    m_avRegistrationPending[channel] = true;
+    // Older deployments did not acknowledge registration. Keep a bounded
+    // fallback for them, but give modern servers time to authenticate first.
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->start();
+    }
+    return false;
+}
+
+void CKernal::scheduleAvChannelRecovery(int channel)
+{
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, channel]() {
+            scheduleAvChannelRecovery(channel);
+        }, Qt::QueuedConnection);
+        return;
+    }
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn) {
+        return;
+    }
+    QTimer *timer = m_avReconnectTimers[channel];
+    if (timer && !timer->isActive()) {
+        timer->start();
+    }
+}
+
+void CKernal::retryAvChannel(int channel)
+{
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn) {
+        return;
+    }
+    if (!ensureAvChannelReady(channel)) {
+        scheduleAvChannelRecovery(channel);
+    }
+}
+
+void CKernal::allowLegacyAvRegistration(int channel)
+{
+    if (channel < 0 || channel > 1 || m_shuttingDown || !m_loggedIn ||
+            !m_avRegistrationPending[channel] || !m_tcpAV[channel] ||
+            !m_tcpAV[channel]->IsConnected()) {
+        return;
+    }
+    m_avRegistrationPending[channel] = false;
+    m_avChannelRegistered[channel].store(true);
+    m_avReconnectTimers[channel]->stop();
+    if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        Q_EMIT SIG_resetVideoEncoder();
+        m_roomDialog->slot_setMediaStatus("视频已连接（兼容模式）");
+    }
 }
 
 void CKernal::sendPendingLogin()
@@ -1719,8 +2355,9 @@ void CKernal::resetAuthenticationState()
     clearPendingProfileSave();
     m_pendingAvatarUploadData.clear();
     m_avatarUploadPending = false;
-    m_avChannelRegistered[0].store(false);
-    m_avChannelRegistered[1].store(false);
+    for (int channel = 0; channel < 2; ++channel) {
+        discardAvChannel(channel);
+    }
 }
 
 void CKernal::scheduleControlReconnect()
@@ -1746,6 +2383,7 @@ void CKernal::beginControlRecovery()
         m_demoDialog->slot_setPushButton_enable(true);
     }
     if (shouldRelogin) {
+        if (!m_loginDeadline->isActive()) m_loginDeadline->start();
         m_loginPending = true;
         if (m_loginDialog) {
             m_loginDialog->slot_setLoginPending(true);
@@ -1755,6 +2393,78 @@ void CKernal::beginControlRecovery()
         } else {
             scheduleControlReconnect();
         }
+    }
+}
+
+void CKernal::failLogin()
+{
+    if (m_useWebRtc && m_gateway) m_gateway->logout();
+    if (!m_loginPending) return;
+    m_loginPending = false;
+    m_loginRequest.clear();
+    m_loginTimeoutTimer->stop();
+    m_controlReconnectTimer->stop();
+    resetAuthenticationState();
+    m_controlSocket->abort();
+    slot_quitRoom();
+    m_demoDialog->hide();
+    m_loginDialog->slot_setLoginPending(false);
+    m_loginDialog->showNormal();
+    QMessageBox::warning(m_loginDialog, "连接失败", "登录等待已超过20秒，请检查网络或服务器后重新登录。");
+}
+
+void CKernal::handleMediaRegistration(int channel, const char* buffer, int length)
+{
+    if (channel < 0 || channel > 1 || !m_loggedIn ||
+            length != static_cast<int>(sizeof(STRU_MEDIA_REGISTER_RS))) return;
+    STRU_MEDIA_REGISTER_RS response = {};
+    memcpy(&response, buffer, sizeof(response));
+    if (response.userId != m_userid ||
+            memcmp(response.sessionToken, m_sessionToken, SESSION_TOKEN_SIZE) != 0) return;
+    m_avRegistrationPending[channel] = false;
+    if (m_avRegistrationFallbackTimers[channel]) {
+        m_avRegistrationFallbackTimers[channel]->stop();
+    }
+    m_avChannelRegistered[channel].store(response.result == 0);
+    if (response.result != 0) {
+        if (m_tcpAV[channel]) {
+            m_tcpAV[channel]->CloseNet();
+        }
+        if (channel == 1) m_roomDialog->slot_setMediaStatus("视频认证失败，正在重试…");
+        scheduleAvChannelRecovery(channel);
+        return;
+    }
+    m_avReconnectTimers[channel]->stop();
+    if (channel == 1) {
+        m_mapIDToVideoDecoder.clear();
+        // Encode an IDR only after the server has accepted the new socket. It
+        // guarantees that receivers joining this share can start decoding.
+        Q_EMIT SIG_resetVideoEncoder();
+        m_roomDialog->slot_setMediaStatus("视频已连接");
+    }
+}
+
+void CKernal::handleVideoKeyFrameRequest(const char* buffer, int length)
+{
+    if (!buffer || length != static_cast<int>(sizeof(STRU_VIDEO_KEYFRAME_RQ)) ||
+            m_roomid == 0 || m_activeVideoSource == VideoSource::None ||
+            !m_avChannelRegistered[1].load()) {
+        return;
+    }
+
+    STRU_VIDEO_KEYFRAME_RQ request = {};
+    memcpy(&request, buffer, sizeof(request));
+    if (request.type != DEF_PACK_VIDEO_KEYFRAME_RQ || request.roomId != m_roomid ||
+            request.requesterUserId <= 0 || request.requesterUserId == m_userid) {
+        return;
+    }
+
+    // A peer may have joined after this stream's first IDR was relayed. Reset
+    // the encoder so its next captured frame is a self-contained starting
+    // point rather than leaving the peer to decode P-frames indefinitely.
+    Q_EMIT SIG_resetVideoEncoder();
+    if (m_roomDialog) {
+        m_roomDialog->slot_setMediaStatus("正在为新观看端同步画面…");
     }
 }
 
@@ -1768,6 +2478,7 @@ void CKernal::clearPendingProfileSave()
 bool CKernal::queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
                                  const QByteArray& avatarData, bool avatarChanged)
 {
+    if (m_useWebRtc) { if (!m_gateway->authenticated()) return false; m_webAvatarChanged = avatarChanged; m_webAvatar = avatarData; m_gateway->updateProfile(name, iconid, feeling); return true; }
     if (!hasAuthenticatedControlConnection()) {
         beginControlRecovery();
         return false;
@@ -1804,22 +2515,42 @@ void CKernal::slot_clientAudioSendData(uint socket, char *buf, int nlen)
     }
     if (!m_tcpAV[0]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[0].store(false);
+        scheduleAvChannelRecovery(0);
     }
 }
 
-void CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
+bool CKernal::slot_clientVideoSendData(uint socket, char *buf, int nlen)
 {
     if (!ensureAvChannelReady(1)) {
-        return;
+        return false;
     }
     if (!m_tcpAV[1]->SendData(socket, buf, nlen)) {
         m_avChannelRegistered[1].store(false);
+        // SendThread must not manipulate the connection object directly.
+        // Serialize its recovery on the GUI thread and replace the dead
+        // socket, otherwise every later frame is counted as a failed send.
+        QMetaObject::invokeMethod(this, [this]() {
+            m_avRegistrationPending[1] = false;
+            if (m_avRegistrationFallbackTimers[1]) {
+                m_avRegistrationFallbackTimers[1]->stop();
+            }
+            if (m_tcpAV[1]) {
+                m_tcpAV[1]->CloseNet();
+            }
+            if (m_roomDialog) {
+                m_roomDialog->slot_setMediaStatus("视频连接已断开，正在重新认证…");
+            }
+            scheduleAvChannelRecovery(1);
+        }, Qt::QueuedConnection);
+        return false;
     }
+    return true;
 }
 
 // 登录提交
 void CKernal::slot_loginCommit(QString tel, QString passwd)
 {
+    if (m_useWebRtc) { webLogin(tel, passwd); return; }
     if (m_loginPending) {
         return;
     }
@@ -1841,6 +2572,7 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 
     resetAuthenticationState();
     m_loginRequest = loginRequest;
+    m_loginDeadline->start();
     m_loginPending = true;
     m_loginDialog->slot_setLoginPending(true);
     // Start the deadline before connecting as well as after writing. A proxy
@@ -1857,6 +2589,7 @@ void CKernal::slot_loginCommit(QString tel, QString passwd)
 void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
                                   int iconid, QByteArray avatarData, bool avatarChanged)
 {
+    if (m_useWebRtc) { webRegister(tel, passwd, nickname, iconid, avatarData, avatarChanged); return; }
     const QByteArray telUtf8 = tel.toUtf8();
     const QByteArray passwordHash = QCryptographicHash::hash(
                 passwd.toUtf8(), QCryptographicHash::Md5).toHex();
@@ -1883,6 +2616,7 @@ void CKernal::slot_registerCommit(QString tel, QString passwd, QString nickname,
 // 加入房间
 void CKernal::slot_joinRoom()
 {
+    if (m_useWebRtc) { webJoinRoom(); return; }
     if (m_roomid != 0) {
         QMessageBox::about(this->m_demoDialog, "提示", "已在房间中,加入失败");
         return;
@@ -1891,13 +2625,24 @@ void CKernal::slot_joinRoom()
         return;
     }
 
-    bool accepted = false;
-    const int roomid = QInputDialog::getInt(m_demoDialog, "加入房间", "房间号:",
-                                            kMinimumRoomId, kMinimumRoomId,
-                                            kMaximumRoomId, 1, &accepted);
-    if (!accepted) {
+    QInputDialog roomDialog(m_demoDialog);
+    roomDialog.setWindowTitle("加入房间");
+    roomDialog.setLabelText("房间号:");
+    roomDialog.setInputMode(QInputDialog::IntInput);
+    roomDialog.setIntRange(kMinimumRoomId, kMaximumRoomId);
+    roomDialog.setIntStep(1);
+    roomDialog.setIntValue(kMinimumRoomId);
+    // The application is dark, while this compact numeric field intentionally
+    // uses a white background.  Force a black value so every room digit stays
+    // legible instead of inheriting the surrounding light text color.
+    roomDialog.setStyleSheet(
+            "QInputDialog QSpinBox, QInputDialog QSpinBox QLineEdit {"
+            "color: #000000; background-color: #ffffff; selection-color: #ffffff;"
+            "selection-background-color: #c92f3b; }");
+    if (roomDialog.exec() != QDialog::Accepted) {
         return;
     }
+    const int roomid = roomDialog.intValue();
     qDebug() << roomid;
     // 发送请求
     STRU_JOINROOM_RQ rq;
@@ -1915,6 +2660,7 @@ void CKernal::slot_joinRoom()
 // 创建房间
 void CKernal::slot_createRoom()
 {
+    if (m_useWebRtc) { if (m_roomid || m_roomRequest != RoomRequest::None) return; beginRoomRequest(RoomRequest::Create); m_gateway->createRoom(); return; }
     if (m_roomid != 0 || m_roomRequest != RoomRequest::None) {
         return;
     }
@@ -1934,38 +2680,144 @@ void CKernal::slot_createRoom()
 void SendThread::setActiveGeneration(quint64 generation)
 {
     m_activeGeneration.store(generation);
+
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    if (m_pendingFrame.buffer && m_pendingFrame.generation != generation) {
+        if (m_pendingFrame.desktopContent) {
+            m_desktopReplacedFrames.fetch_add(1);
+        }
+        delete[] m_pendingFrame.buffer;
+        m_pendingFrame = PendingFrame();
+    }
 }
 
-void SendThread::slot_threadSendData(uint socket, char *buf, int nlen,
-                                     quint64 generation)
+SendThread::~SendThread()
 {
-    if (generation != m_activeGeneration.load()) {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    delete[] m_pendingFrame.buffer;
+    m_pendingFrame = PendingFrame();
+}
+
+void SendThread::takeDesktopStats(quint64 *sentFrames, quint64 *replacedFrames,
+                                  quint64 *lateFrames, quint64 *failedFrames)
+{
+    if (sentFrames) {
+        *sentFrames = m_desktopSentFrames.exchange(0);
+    }
+    if (replacedFrames) {
+        *replacedFrames = m_desktopReplacedFrames.exchange(0);
+    }
+    if (lateFrames) {
+        *lateFrames = m_desktopLateFrames.exchange(0);
+    }
+    if (failedFrames) {
+        *failedFrames = m_desktopFailedFrames.exchange(0);
+    }
+}
+
+void SendThread::slot_queueLatestFrame(uint socket, char *buf, int nlen,
+                                       quint64 generation, bool desktopContent)
+{
+    const int videoHeaderBytes = 7 * static_cast<int>(sizeof(int));
+    if (!buf || nlen < videoHeaderBytes) {
         delete[] buf;
         return;
     }
-    //qDebug() <<"slot_threadSendData"<<QThread::currentThreadId();
-    // 判断是否有延迟 丢包
-    char* tmp = buf;
-// 类型
-    tmp += sizeof(int);
-// 用户id
-    tmp += sizeof(int);
-// 房间id
-    tmp += sizeof(int);
-    int hour = *(int*)tmp;
-    tmp += sizeof(int);
-    int min = *(int*)tmp;
-    tmp += sizeof(int);
-    int sec = *(int*)tmp;
-    tmp += sizeof(int);
-    int msec = *(int*)tmp;
-    tmp += sizeof(int);
 
-    QTime tm(hour, min, sec, msec);
+    const bool stopFrame = nlen == videoHeaderBytes;
+    bool keyFrame = false;
+    if (!stopFrame && nlen >= videoHeaderBytes + static_cast<int>(sizeof(H264PayloadHeader))) {
+        H264PayloadHeader header = {};
+        memcpy(&header, buf + videoHeaderBytes, sizeof(header));
+        keyFrame = header.magic == H264_PAYLOAD_MAGIC
+                && header.version == H264_PAYLOAD_VERSION
+                && (header.flags & H264_PAYLOAD_FLAG_KEYFRAME);
+    }
 
-    // 延迟超过200ms丢弃包
-    if(tm.msecsTo(QTime::currentTime()) <= 200)
-        CKernal::getInstance()->slot_clientVideoSendData(socket, buf, nlen);
-        // CKernal::getInstance()->slot_clientSendData(socket, buf, nlen);
-    delete[] buf;
+    bool scheduleSend = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        // Delta frames can be replaced to keep latency low, but never replace
+        // a waiting key frame.  Doing so leaves a newly joined viewer with an
+        // endless sequence of P-frames and no point from which to decode.
+        if (m_pendingFrame.buffer && m_pendingFrame.keyFrame && !keyFrame && !stopFrame) {
+            if (desktopContent) {
+                m_desktopReplacedFrames.fetch_add(1);
+            }
+            delete[] buf;
+            return;
+        }
+        if (m_pendingFrame.buffer) {
+            if (m_pendingFrame.desktopContent) {
+                m_desktopReplacedFrames.fetch_add(1);
+            }
+            delete[] m_pendingFrame.buffer;
+        }
+        m_pendingFrame.socket = socket;
+        m_pendingFrame.buffer = buf;
+        m_pendingFrame.length = nlen;
+        m_pendingFrame.generation = generation;
+        m_pendingFrame.desktopContent = desktopContent;
+        m_pendingFrame.keyFrame = keyFrame;
+        m_pendingFrame.stopFrame = stopFrame;
+        m_pendingFrame.queuedAt = std::chrono::steady_clock::now();
+        if (!m_sendScheduled) {
+            m_sendScheduled = true;
+            scheduleSend = true;
+        }
+    }
+
+    if (scheduleSend) {
+        QMetaObject::invokeMethod(this, "slot_sendLatestFrame", Qt::QueuedConnection);
+    }
+}
+
+void SendThread::slot_sendLatestFrame()
+{
+    PendingFrame frame;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        if (!m_pendingFrame.buffer) {
+            m_sendScheduled = false;
+            return;
+        }
+        frame = m_pendingFrame;
+        m_pendingFrame = PendingFrame();
+    }
+
+    const bool isCurrentGeneration = frame.generation == m_activeGeneration.load();
+    // An IDR frame (and a final stop frame) remains meaningful even after the
+    // short low-latency queue window.  It must leave the client before later
+    // delta frames; otherwise remote viewers can wait forever for a decodable
+    // picture when a high-resolution share briefly blocks the TCP writer.
+    const bool isFresh = frame.keyFrame || frame.stopFrame
+            || std::chrono::steady_clock::now() - frame.queuedAt
+            <= kMaximumQueuedVideoAge;
+    if (!isCurrentGeneration || !isFresh) {
+        if (frame.desktopContent) {
+            m_desktopLateFrames.fetch_add(1);
+        }
+    } else if (CKernal::getInstance()->slot_clientVideoSendData(frame.socket,
+                                                                  frame.buffer,
+                                                                  frame.length)) {
+        if (frame.desktopContent) {
+            m_desktopSentFrames.fetch_add(1);
+        }
+    } else if (frame.desktopContent) {
+        m_desktopFailedFrames.fetch_add(1);
+    }
+    delete[] frame.buffer;
+
+    bool sendNext = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        if (m_pendingFrame.buffer) {
+            sendNext = true;
+        } else {
+            m_sendScheduled = false;
+        }
+    }
+    if (sendNext) {
+        QMetaObject::invokeMethod(this, "slot_sendLatestFrame", Qt::QueuedConnection);
+    }
 }

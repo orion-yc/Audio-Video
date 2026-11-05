@@ -59,7 +59,7 @@ bool UdpNet::InitNet(const char* szBufIP , unsigned short port)
     addr.sin_port = htons( port );  //htons 转换为网络字节序 大端存储  43232
     m_port = port;
 
-	if( bind( m_sock ,(const sockaddr* ) &addr , sizeof(addr) ) == SOCKET_ERROR )
+	if( ::bind( m_sock ,(const sockaddr* ) &addr , sizeof(addr) ) == SOCKET_ERROR )
 	{
 		UnInitNet();
         return false;

@@ -1,17 +1,31 @@
 #include "myfacedetect.h"
+#if !defined(_MSC_VER)
 #include <opencv2/objdetect.hpp>
+#endif
 #include<QCoreApplication>
 #include<qDebug>
 
-CascadeClassifier face_cascade;
-CascadeClassifier eyes_cascade;
-String window_name_face = "Capture - Face";
+#if !defined(_MSC_VER)
+cv::CascadeClassifier face_cascade;
+cv::CascadeClassifier eyes_cascade;
+cv::String window_name_face = "Capture - Face";
+#endif
 
 MyFaceDetect::MyFaceDetect()
 {
 
 }
 
+#if defined(_MSC_VER)
+void MyFaceDetect::FaceDetectInit()
+{
+}
+
+void MyFaceDetect::detectAndDisplay(cv::Mat &, std::vector<cv::Rect> &faces)
+{
+    faces.clear();
+}
+#else
 void MyFaceDetect::FaceDetectInit()
 {
     // 将 xml 文件放在 exe 同级的目录下面
@@ -40,12 +54,12 @@ void MyFaceDetect::FaceDetectInit()
     }
 }
 
-void MyFaceDetect::detectAndDisplay(Mat &frame, std::vector<Rect> &faces)
+void MyFaceDetect::detectAndDisplay(cv::Mat &frame, std::vector<cv::Rect> &faces)
 {
-    Mat frame_gray;
+    cv::Mat frame_gray;
     //首先 , 得到无颜色的图片用于做识别
-    cvtColor(frame, frame_gray, cv::COLOR_BGR2GRAY);
-    equalizeHist( frame_gray, frame_gray );
+    cv::cvtColor(frame, frame_gray, cv::COLOR_BGR2GRAY);
+    cv::equalizeHist( frame_gray, frame_gray );
     //-- 多尺寸检测人脸
     //第三个参数 每个图像比例下图像大小减少多少的参数。
     //第四个参数 指定每个候选矩形应该为邻居保留多少个像素。
@@ -53,17 +67,17 @@ void MyFaceDetect::detectAndDisplay(Mat &frame, std::vector<Rect> &faces)
     //第六个参数 最小可能对象大小。小于该值的对象将被忽略。
     //第七个参数 最大可能对象大小。大于该值的对象将被忽略
     face_cascade.detectMultiScale( frame_gray, faces
-                                   , 1.2, 6, 0, Size(100,100) , Size(500, 500) );
+                                   , 1.2, 6, 0, cv::Size(100,100) , cv::Size(500, 500) );
 
     //imshow( "capture_face", frame );
     //为了防止误识别, 再识别眼睛
     for( auto ite = faces.begin() ; ite != faces.end() ; )
     {
-        Rect rct = *ite;
-        Mat faceROI = frame_gray( rct );
-        std::vector<Rect> eyes;
+        cv::Rect rct = *ite;
+        cv::Mat faceROI = frame_gray( rct );
+        std::vector<cv::Rect> eyes;
         //-- 在每张人脸上检测双眼
-        eyes_cascade.detectMultiScale( faceROI, eyes , 1.01, 2, 0 , Size(20, 20) );
+        eyes_cascade.detectMultiScale( faceROI, eyes , 1.01, 2, 0 , cv::Size(20, 20) );
         //正常 鼻子的大小 应该不超过脸的 1/3
         if( eyes.size() != 2 )
         {
@@ -91,12 +105,13 @@ void MyFaceDetect::detectAndDisplay(Mat &frame, std::vector<Rect> &faces)
     //绘制识别的人脸矩形
     for( auto ite = faces.begin() ; ite != faces.end() ; ++ite )
     {
-        Rect rct = *ite;
-        Point center( rct.x + rct.width*0.5, rct.y + rct.height*0.5 );
-        ellipse( frame, center, Size( rct.width*0.5, rct.height*0.5), 0, 0, 360,
-                 Scalar( 255, 0, 255 ), 4, 8, 0 );
+        cv::Rect rct = *ite;
+        cv::Point center( rct.x + rct.width*0.5, rct.y + rct.height*0.5 );
+        cv::ellipse( frame, center, cv::Size( rct.width*0.5, rct.height*0.5), 0, 0, 360,
+                 cv::Scalar( 255, 0, 255 ), 4, 8, 0 );
     }
     //-- 显示结果图像
    // imshow( window_name_face, frame );
 
 }
+#endif

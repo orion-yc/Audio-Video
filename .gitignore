@@ -40,11 +40,48 @@ ui_*.h
 /dist/
 /packaging/build-*.log
 
-# Downloaded FFmpeg SDKs. The release script expects the LGPL shared build
-# under third_party when producing a local installer.
+# The checked-in MSVC dependency set is deliberately limited to release
+# headers, libraries and runtime DLLs. Keep vcpkg build caches, debug output,
+# source checkouts and FFmpeg documentation out of Git.
 /third_party/ffmpeg-*/
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/LICENSE.txt
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/include/
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/include/**
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/avcodec.lib
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/avutil.lib
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/swscale.lib
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avcodec-63.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avutil-61.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swresample-7.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swscale-10.dll
+/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/*
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avcodec-63.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/avutil-61.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swresample-7.dll
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/bin/swscale-10.dll
+/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/*
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/avcodec.lib
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/avutil.lib
+!/third_party/ffmpeg-master-latest-win64-lgpl-shared/lib/swscale.lib
+/third_party/ffmpeg-master-latest-win64-lgpl-shared/doc/
+/third_party/ffmpeg-master-latest-win64-lgpl-shared/presets/
 /third_party-ffmpeg*.zip
 /third_party-ffmpeg*.7z
+/third_party/vcpkg/*
+!/third_party/vcpkg/.gitignore
+!/third_party/vcpkg/installed/
+!/third_party/vcpkg/installed/x64-windows/
+/third_party/vcpkg/installed/x64-windows/*
+!/third_party/vcpkg/installed/x64-windows/include/
+!/third_party/vcpkg/installed/x64-windows/include/**
+!/third_party/vcpkg/installed/x64-windows/lib/
+!/third_party/vcpkg/installed/x64-windows/lib/**
+!/third_party/vcpkg/installed/x64-windows/bin/
+!/third_party/vcpkg/installed/x64-windows/bin/*.dll
+/vcpkg_installed/
 
 # Local server credentials. Keep the checked-in example file instead.
 /deploy/meeting-server.env
@@ -60,3 +97,7 @@ ui_*.h
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Pinned LiveKit SDK; installed and SHA-256 verified by the packaging script.
+/third_party/livekit-1.13.0/
+/build-webrtc-tests/

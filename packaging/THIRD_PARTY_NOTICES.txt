@@ -15,3 +15,10 @@ FFmpeg source code and build information are available from:
 The application links to FFmpeg through replaceable shared DLLs. NVIDIA NVENC
 uses the NVIDIA display driver installed on the computer. OpenH264 is used as
 the software fallback encoder.
+
+This package also includes OpenCV shared libraries for camera processing and
+face detection. OpenCV is distributed under the Apache License 2.0; a copy is
+included at THIRD_PARTY_LICENSES\OpenCV-4.12.0.txt.
+
+LiveKit C++ SDK 1.13.0 (https://github.com/livekit/client-sdk-cpp), Apache-2.0.
+See THIRD_PARTY_LICENSES/LiveKit-Apache-2.0.txt.

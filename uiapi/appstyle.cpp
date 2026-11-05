@@ -128,7 +128,8 @@ void applyAppStyle(QApplication &application)
         QPushButton#pb_min,
         QPushButton#pb_max,
         QPushButton#pb_hide,
-        QPushButton#pb_close {
+        QPushButton#pb_close,
+        QToolButton#pb_diagnostics {
             background: transparent;
             border: 0;
             border-radius: 4px;
@@ -140,7 +141,8 @@ void applyAppStyle(QApplication &application)
 
         QPushButton#pb_min:hover,
         QPushButton#pb_max:hover,
-        QPushButton#pb_hide:hover {
+        QPushButton#pb_hide:hover,
+        QToolButton#pb_diagnostics:hover {
             background: #2A2E34;
             color: #FFFFFF;
         }
@@ -243,6 +245,98 @@ void applyAppStyle(QApplication &application)
 
         QScrollArea#sa_userList QWidget#scrollAreaWidgetContents,
         QWidget#wdg_userList { background: #101216; }
+
+        QFrame#wdg_chatPanel {
+            background: #101216;
+            border: 1px solid #292D33;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_chatTitle { color: #FFFFFF; font-weight: 600; }
+        QLabel#lb_chatHint { color: #777F8B; font-size: 12px; }
+
+        QTextBrowser#tb_chatHistory {
+            background: #0D0F12;
+            border: 1px solid #252A30;
+            border-radius: 4px;
+            padding: 8px;
+        }
+
+        QTextEdit#te_chatInput {
+            background: #181B20;
+            border: 1px solid #343941;
+            border-radius: 4px;
+            color: #F8FAFC;
+            padding: 7px 9px;
+        }
+
+        QTextEdit#te_chatInput:focus { border-color: #E5484D; }
+
+        QPushButton#pb_chatToggle,
+        QPushButton#pb_chatSend {
+            background: #24282E;
+            border: 1px solid #3C424B;
+            color: #F4F4F5;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
+        QPushButton#pb_chatToggle:hover,
+        QPushButton#pb_chatSend:hover {
+            background: #2A171A;
+            border-color: #E5484D;
+            color: #FFFFFF;
+        }
+
+        QToolButton#pb_chatClose {
+            background: transparent;
+            border: 0;
+            color: #A5ACB5;
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        QToolButton#pb_chatClose:hover { background: #2A2E34; color: #FFFFFF; }
+
+        QDialog#UserProfileDialog { background: #111315; }
+
+        QLabel#lb_profileAvatar {
+            background: #090A0C;
+            border: 2px solid #C9363D;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_profileName {
+            color: #FFFFFF;
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        QLabel#lb_profileMemberType { color: #FF8B90; font-size: 12px; }
+
+        QFrame#wdg_profileDetails {
+            background: #0D0F12;
+            border: 1px solid #292D33;
+            border-radius: 6px;
+        }
+
+        QLabel#lb_profileCaption { color: #777F8B; font-size: 12px; }
+        QLabel#lb_profileValue { color: #F4F4F5; font-weight: 600; }
+        QLabel#lb_profileFeeling { color: #D7DBE0; }
+
+        QPushButton#pb_profileClose {
+            background: #24282E;
+            border: 1px solid #3C424B;
+            color: #F4F4F5;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
+        QPushButton#pb_profileClose:hover {
+            background: #2A171A;
+            border-color: #E5484D;
+            color: #FFFFFF;
+        }
 
         UserShow {
             background: #090A0C;

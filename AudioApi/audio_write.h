@@ -8,12 +8,13 @@ class Audio_Write : public QObject
 {
     Q_OBJECT
 public:
-    explicit Audio_Write(QObject *parent = nullptr);
+    explicit Audio_Write(QObject *parent = nullptr, bool pcmMode = false);
     ~Audio_Write();
 signals:
 
 public slots:
     void slot_net_rx( QByteArray ba );
+    void slot_pcm_rx(const QByteArray &pcm);
 private:
     QAudioFormat format;
 

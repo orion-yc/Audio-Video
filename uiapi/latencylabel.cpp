@@ -1,12 +1,23 @@
 #include "latencylabel.h"
 
+#include <QMouseEvent>
+
 LatencyLabel::LatencyLabel(QWidget *parent)
     : QLabel(parent)
 {
     setAlignment(Qt::AlignCenter);
     setFixedSize(88, 24);
-    setToolTip("每 5 秒自动测量到会议服务器的连接延迟");
+    setToolTip("每 5 秒自动测量到会议服务器的连接延迟；点击显示或隐藏共享状态");
+    setCursor(Qt::PointingHandCursor);
     setLatency(-1);
+}
+
+void LatencyLabel::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event && event->button() == Qt::LeftButton) {
+        Q_EMIT clicked();
+    }
+    QLabel::mouseReleaseEvent(event);
 }
 
 void LatencyLabel::setLatency(int latencyMs)

@@ -3,7 +3,9 @@
 
 #include <QObject>
 #include "audio_common.h"
-#include<QTimer>
+#include <QQueue>
+#include <QElapsedTimer>
+#include <QTimer>
 
 class Audio_Read : public QObject
 {
@@ -17,19 +19,33 @@ public:
 signals:
     //定时采集的数据, 以信号形式发送
     void SIG_audioFrame( QByteArray &ba);
+    void SIG_pcmFrame(QByteArray pcm);
 public slots:
 //开始采集
     void start();
+    void setPcmMode(bool enabled);
 //暂停采集
     void pause();
+    // Enable/disable mixing of the WASAPI system-output stream.
+    void setSystemAudioEnabled(bool enabled);
+    void slot_systemAudioFrame(const QByteArray &pcm);
 //定时超时槽函数
     void slot_readMore();
 private:
+    void drainMixedFrames();
+    void encodeAndEmit(const QByteArray &pcm);
+
+    bool m_pcmMode = false;
+    qsizetype m_pcmFrameBytes = 640;
     QAudioFormat    format;
     QTimer*         m_timer;
     QAudioSource*   audio_in ;
     QIODevice*      myBuffer_in ;
     int             m_recordState;
+    bool            m_systemAudioEnabled;
+    QByteArray      m_micPcmPending;
+    QByteArray      m_systemPcmPending;
+    QElapsedTimer   m_mixWaitTimer;
     ///编码
     //SPEEX 相关变量
     SpeexBits bits_enc;

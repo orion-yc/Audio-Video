@@ -28,14 +28,14 @@ private slots:
     void slot_readMore();
 
 private:
-    VideoCapture m_capture;
+    cv::VideoCapture m_capture;
     QTimer *m_timer;
     int m_captureFrameRate;
     int m_funnyPic;
     bool m_faceDetectionReady;
     QImage m_tuer;
     QImage m_hat;
-    std::vector<Rect> m_vecLastFace;
+    std::vector<cv::Rect> m_vecLastFace;
 };
 
 // The controller stays on the GUI thread while the device runs in a worker.

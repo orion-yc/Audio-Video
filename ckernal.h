@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QThread>
 #include <logindialog.h>
 #include <demodialog.h>
 #include "TcpClientMediator.h"
@@ -16,15 +17,22 @@
 #include <map>
 
 #include "audio_read.h"
+#include "system_audio_read.h"
 #include "audio_write.h"
 #include "video_read.h"
 #include "desk_read.h"
 #include "h264codec.h"
 #include "video_encode_thread.h"
+#include "video_decode_worker.h"
 #include "workthread.h"
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <mutex>
 class CKernal;
+class GatewayClient;
+class RtcSession;
+class UserProfileDialog;
 
 typedef void (CKernal::*PFUN)(uint socket,char* buf,int nlen);
 
@@ -33,12 +41,37 @@ class SendThread: public WorkThread
 {
     Q_OBJECT
 public:
+    ~SendThread() override;
     void setActiveGeneration(quint64 generation);
+    void takeDesktopStats(quint64 *sentFrames, quint64 *replacedFrames,
+                          quint64 *lateFrames, quint64 *failedFrames);
 
 public slots:
-    void slot_threadSendData(uint socket, char* buf, int nlen, quint64 generation);
+    // This slot is deliberately invoked directly by the GUI thread.  It only
+    // swaps a pending pointer under a mutex; network I/O stays on this worker.
+    void slot_queueLatestFrame(uint socket, char* buf, int nlen, quint64 generation,
+                               bool desktopContent);
+    void slot_sendLatestFrame();
 private:
+    struct PendingFrame {
+        uint socket = 0;
+        char *buffer = nullptr;
+        int length = 0;
+        quint64 generation = 0;
+        bool desktopContent = false;
+        bool keyFrame = false;
+        bool stopFrame = false;
+        std::chrono::steady_clock::time_point queuedAt;
+    };
+
     std::atomic<quint64> m_activeGeneration { 0 };
+    std::mutex m_pendingMutex;
+    PendingFrame m_pendingFrame;
+    bool m_sendScheduled = false;
+    std::atomic<quint64> m_desktopSentFrames { 0 };
+    std::atomic<quint64> m_desktopReplacedFrames { 0 };
+    std::atomic<quint64> m_desktopLateFrames { 0 };
+    std::atomic<quint64> m_desktopFailedFrames { 0 };
 };
 
 
@@ -52,9 +85,10 @@ private:
     CKernal(const CKernal&) = delete;
     CKernal& operator=(const CKernal&) = delete;
 signals:
-    void SIG_sendVideoFrame(uint socket, char* buf, int nlen, quint64 generation);
+    void SIG_sendVideoFrame(uint socket, char* buf, int nlen, quint64 generation,
+                            bool desktopContent);
     void SIG_encodeVideoFrame(QImage image, int frameRate, int bitRate,
-                              quint64 generation);
+                              bool desktopContent, quint64 generation);
     void SIG_resetVideoEncoder();
 public:
     static CKernal* getInstance()
@@ -84,6 +118,7 @@ public slots:
     void slot_dealVideoFrame( uint socket, char* buf, int nlen);
     void slot_dealAvatarUploadRs(uint socket, char* buf, int nlen);
     void slot_dealAvatarDataRs(uint socket, char* buf, int nlen);
+    void slot_dealRoomChatMessage(uint socket, char* buf, int nlen);
 
 
     // 客户端发送数据
@@ -91,7 +126,7 @@ public slots:
     // 音频发送接口
     void slot_clientAudioSendData( uint socket, char* buf, int nlen);
     // 视频发送接口
-    void slot_clientVideoSendData( uint socket, char* buf, int nlen);
+    bool slot_clientVideoSendData( uint socket, char* buf, int nlen);
 
 
     // ui槽函数
@@ -110,22 +145,31 @@ public slots:
     // 音视频控制 开关
     void slot_audioOpen();
     void slot_audioClose();
+    void slot_systemAudioStateChanged(bool enabled);
+    void slot_systemAudioDeviceChanged(const QString &deviceId);
     void slot_captureOpen();
     void slot_captureClose();
     void slot_deskOpen();
     void slot_deskClose();
     void slot_setDesktopShareSettings(int width, int height, int frameRate);
+    void slot_setDesktopShareScreen(const QString &screenName);
+    void slot_sendRoomChatMessage(const QString &message);
+    void slot_showRoomMemberProfile(int userId);
 
     void slot_sendAudioFrame(QByteArray &ba );
     void slot_refleshVideoImage(QImage img);
     void slot_refleshCameraVideoImage(QImage img);
     void slot_refleshDesktopVideoImage(QImage img);
-    void slot_sendVideoFrameData(const QByteArray &ba, quint64 generation);
+    void slot_sendVideoFrameData(const QByteArray &ba, quint64 generation,
+                                 bool desktopContent = false);
     void slot_sendCameraVideoFrame(QImage img);
     void slot_sendDesktopVideoFrame(QImage img);
     void slot_sendH264Frame(QByteArray encoded, int flags, int width, int height,
-                            quint64 generation);
+                            quint64 generation, QString encoderName);
     void slot_videoEncodeFinished();
+    void slot_videoFrameDecoded(int userId, int roomId, quint64 generation,
+                                QImage image, bool decoded);
+    void slot_updateDesktopShareStats();
     void slot_refleshUserImage(int id, QImage &img);
 
     void slot_setFunnyPic(int picid);
@@ -145,7 +189,11 @@ public slots:
     void slot_dealVideoChannelData(uint socket, char* buf, int nlen);
 
 
+#ifdef AUDIO_VIDEO_TESTING
+public:
+#else
 private:
+#endif
     enum class RoomRequest
     {
         None,
@@ -178,8 +226,17 @@ private:
     bool queueUserInfoSave(int iconid, const QString& name, const QString& feeling,
                            const QByteArray& avatarData, bool avatarChanged);
     void ensureControlConnection();
-    void ensureAvConnections();
-    bool ensureAvChannelReady(int channel);
+    void ensureAvConnections(bool forceRegistration = false);
+    bool ensureAvChannelReady(int channel, bool forceRegistration = false);
+    void createAvChannel(int channel);
+    void discardAvChannel(int channel);
+    void scheduleAvChannelRecovery(int channel);
+    void retryAvChannel(int channel);
+    void allowLegacyAvRegistration(int channel);
+    void handleMediaRegistration(int channel, const char* buffer, int length);
+    void handleVideoKeyFrameRequest(const char* buffer, int length);
+    void failLogin();
+    QTimer* m_loginDeadline = nullptr;
     void sendPendingLogin();
     void sendPendingRegistration();
     void resetAuthenticationState();
@@ -188,6 +245,26 @@ private:
     void clearPendingProfileSave();
     int desktopShareBitRate(int width, int height, int frameRate) const;
 
+    void setupWebRtc();
+    void webLogin(const QString &phone, const QString &password);
+    void webRegister(const QString &phone, const QString &password, const QString &name,
+                     int icon, const QByteArray &avatar, bool avatarChanged);
+    void webJoinRoom();
+    void removeWebParticipant(int id);
+    bool m_useWebRtc = true;
+    QString m_gatewayUrl = QStringLiteral("https://video.onnotify.top");
+    QString m_liveKitUrl = QStringLiteral("wss://video.onnotify.top");
+    GatewayClient *m_gateway = nullptr;
+    RtcSession *m_rtc = nullptr;
+    QString m_webRoomName;
+    QString m_webRegisterPhone, m_webRegisterPassword, m_webRegisterName;
+    int m_webRegisterIcon = 5;
+    bool m_webRegistrationPending = false;
+    bool m_webAvatarChanged = false;
+    QByteArray m_webAvatar;
+    std::atomic<quint64> m_webSentFrames {0};
+    int m_webTargetBitrate = 0;
+    QElapsedTimer m_webBitrateClock;
     PFUN                            m_netMap[DEF_PACK_COUNT];
     LoginDialog*                    m_loginDialog;
     demoDialog*                     m_demoDialog;
@@ -205,12 +282,17 @@ private:
     QString                         m_name;
     int                             m_userIconId;
     QImage                          m_userAvatar;
+    QString                         m_userFeeling;
     SetUserDialog*                  m_setUserDialog;
+    UserProfileDialog*              m_userProfileDialog;
     // 每个用户视频的显示
     std::map<int, UserShow*>        m_mapIDToUserShow;
+    QElapsedTimer                   m_videoUiClock;
+    std::map<int, qint64>           m_thumbnailLastPaintMs;
 
     // 音频
-    Audio_Read*                     m_audioRead;
+    Audio_Read*                     m_audioRead = nullptr;
+    SystemAudio_Read*               m_systemAudioRead = nullptr;
     // Audio_Write 每个用户都创建
     std::map<int, Audio_Write*>     m_mapIDToAudioWrite;
     Video_Read*                     m_videoRead;
@@ -218,18 +300,34 @@ private:
 
     QSharedPointer<SendThread>      m_sendVideoThread;
     QSharedPointer<VideoEncodeThread> m_videoEncodeThread;
+    QThread*                         m_videoDecodeThread = nullptr;
+    VideoDecodeWorker*               m_videoDecodeWorker = nullptr;
+    std::atomic<quint64>              m_remoteVideoGeneration { 0 };
     std::map<int, std::unique_ptr<H264Decoder>> m_mapIDToVideoDecoder;
     std::atomic_bool                 m_videoEncodeBusy;
+    std::mutex                       m_pendingDesktopFrameMutex;
+    QImage                           m_pendingDesktopFrame;
     quint64                          m_videoStreamGeneration;
     VideoSource                      m_activeVideoSource;
     int                              m_desktopWidth;
     int                              m_desktopHeight;
     int                              m_desktopFrameRate;
     int                              m_desktopBitRate;
+    QString                          m_desktopEncoderName;
+    QTimer*                          m_desktopStatsTimer;
+    std::atomic<quint64>             m_desktopCapturedFrames { 0 };
+    std::atomic<quint64>             m_desktopEncodedFrames { 0 };
+    std::atomic<quint64>             m_desktopEncoderDroppedFrames { 0 };
+    int                              m_desktopNoCaptureIntervals = 0;
+    int                              m_desktopNoEncodeIntervals = 0;
+    int                              m_desktopNoSendIntervals = 0;
 
     // 视频和音频单独的 tcp，只有主控制连接认证成功后才创建。
     TcpClientMediator*              m_tcpAV[2] = { nullptr, nullptr }; // 0 音频 1 视频
     std::atomic_bool                m_avChannelRegistered[2] = { false, false };
+    bool                            m_avRegistrationPending[2] = { false, false };
+    QTimer*                         m_avReconnectTimers[2] = { nullptr, nullptr };
+    QTimer*                         m_avRegistrationFallbackTimers[2] = { nullptr, nullptr };
     QTcpSocket*                     m_latencySocket;
     QTimer*                         m_latencyTimer;
     QTimer*                         m_latencyTimeoutTimer;
@@ -261,7 +359,9 @@ private:
     int                             m_pendingRoomId;
 
     void updateLatencyDisplay(int latencyMs);
-    void queueVideoFrame(const QImage &image, int frameRate, int bitRate);
+    void resetDesktopShareStats();
+    void queueVideoFrame(const QImage &image, int frameRate, int bitRate,
+                         bool desktopContent);
 };
 
 //  当前视频和音频同时传输时，音频会卡顿，视频会有较大延迟

@@ -1,39 +1,50 @@
 HEADERS += \
     $$PWD/desk_read.h \
+    $$PWD/dxgi_desktop_capture.h \
     $$PWD/h264codec.h \
     $$PWD/myfacedetect.h \
     $$PWD/video_common.h \
+    $$PWD/video_decode_worker.h \
+    $$PWD/rtc_session.h \
     $$PWD/video_encode_thread.h \
     $$PWD/video_read.h
 
 SOURCES += \
     $$PWD/desk_read.cpp \
+    $$PWD/dxgi_desktop_capture.cpp \
     $$PWD/h264codec.cpp \
     $$PWD/myfacedetect.cpp \
+    $$PWD/video_decode_worker.cpp \
+    $$PWD/rtc_session.cpp \
     $$PWD/video_encode_thread.cpp \
     $$PWD/video_read.cpp
 
-OPENCV_ROOT = E:/perject/OpenCV-4.13.0-MinGW64/install
-OPENCV_LIBDIR = $$OPENCV_ROOT/x64/mingw/lib
-INCLUDEPATH += $$OPENCV_ROOT/include
+!msvc {
+    error("Audio-Video is built with Qt 6.11.1 MSVC 2022 x64 only.")
+}
 
-LIBS += -L$$OPENCV_LIBDIR \
-    -lopencv_calib3d4130 \
-    -lopencv_features2d4130 \
-    -lopencv_flann4130 \
-    -lopencv_highgui4130 \
-    -lopencv_imgcodecs4130 \
-    -lopencv_imgproc4130 \
-    -lopencv_ml4130 \
-    -lopencv_objdetect4130 \
-    -lopencv_photo4130 \
-    -lopencv_video4130 \
-    -lopencv_videoio4130 \
-    -lopencv_core4130
+VCPKG_ROOT = $$PWD/../third_party/vcpkg/installed/x64-windows
+INCLUDEPATH += $$VCPKG_ROOT/include/opencv4
 
+OPENCV_WORLD_LIB = $$files($$VCPKG_ROOT/lib/opencv_world*.lib)
+isEmpty(OPENCV_WORLD_LIB) {
+    error("Bundled MSVC OpenCV library was not found. Restore third_party dependencies.")
+}
+LIBS += $$OPENCV_WORLD_LIB
 FFMPEG_ROOT = $$PWD/../third_party/ffmpeg-master-latest-win64-lgpl-shared
 INCLUDEPATH += $$FFMPEG_ROOT/include
-LIBS += -L$$FFMPEG_ROOT/lib \
-    -lavcodec \
-    -lavutil \
-    -lswscale
+LIBS += $$FFMPEG_ROOT/lib/avcodec.lib \
+    $$FFMPEG_ROOT/lib/avutil.lib \
+    $$FFMPEG_ROOT/lib/swscale.lib
+
+win32:LIBS += d3d11.lib dxgi.lib user32.lib
+
+# Pin the native SDK ABI. The release script installs this verified bundle.
+isEmpty(LIVEKIT_SDK_ROOT) {
+    LIVEKIT_SDK_ROOT = $$PWD/../third_party/livekit-1.13.0/livekit-sdk-windows-x64-1.13.0
+}
+!exists($$LIVEKIT_SDK_ROOT/include/livekit/encoded_video_source.h) {
+    error("Run packaging/install-livekit-sdk.ps1 before building.")
+}
+INCLUDEPATH += $$LIVEKIT_SDK_ROOT/include
+LIBS += $$LIVEKIT_SDK_ROOT/lib/livekit.lib

@@ -6,9 +6,13 @@
 #include<QApplication>
 #include<QScreen>
 #include<QImage>
+#include<QMutex>
+#include<QString>
 #include <atomic>
+#include <memory>
 #include"video_common.h"
 #include"workthread.h"
+#include "dxgi_desktop_capture.h"
 
 class Desk_Read;
 class DeskReadThread: public WorkThread
@@ -39,9 +43,12 @@ public slots:
     void start();
     void pause();
     void setCaptureSettings(int maxWidth, int maxHeight, int frameRate);
+    void setCaptureScreenName(const QString &screenName);
     void slot_scheduleFrame();
     void slot_getScreenFrame();
 private:
+    QScreen *captureScreen() const;
+
     QTimer* m_timer;
     QSharedPointer<DeskReadThread> m_deskReadThread;
     std::atomic_bool m_capturing;
@@ -49,6 +56,12 @@ private:
     std::atomic_int m_maxWidth;
     std::atomic_int m_maxHeight;
     std::atomic_int m_frameRate;
+    std::atomic_int m_cursorX { 0 };
+    std::atomic_int m_cursorY { 0 };
+    mutable QMutex m_captureScreenMutex;
+    QString m_captureScreenName;
+    QString m_lastCaptureBackend;
+    std::unique_ptr<DxgiDesktopCapture> m_dxgiCapture;
 };
 
 // 需要 输出 截屏(qt) -> 信号形式输出

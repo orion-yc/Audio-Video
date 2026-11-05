@@ -27,12 +27,17 @@ public slots:
     void slot_setAvatarImage(const QImage &img);
     void slot_setPreviewImage(const QImage &img);
     void slot_clearVideo();
+    void slot_setViewScale(double scale);
     // 重写重绘事件
     void paintEvent(QPaintEvent* event);
     void mousePressEvent(QMouseEvent * event);
+    void mouseMoveEvent(QMouseEvent *event);
+    void mouseReleaseEvent(QMouseEvent *event);
 
     void slot_checkTimeOut();
 private:
+    void clampPanOffset(const QSizeF &imageSize, const QRectF &availableRect);
+
     Ui::UserShow *ui;
 
     int m_id;
@@ -45,6 +50,12 @@ private:
     QImage m_avatarImg;
     QTime  m_lastTime;
     QTimer  m_timer;
+    double m_viewScale = 0.0;
+    QPointF m_panOffset;
+    QPointF m_lastDragPosition;
+    QPointF m_dragStartPosition;
+    bool m_dragging = false;
+    bool m_dragMoved = false;
 };
 
 // 添加点击事件 点击发送信号 发送内容 id， name
