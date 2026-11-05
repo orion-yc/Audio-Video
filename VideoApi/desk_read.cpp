@@ -169,7 +169,7 @@ void Desk_Read::slot_getScreenFrame()
     // DXGI duplication avoids the compositor round-trip and the QPixmap
     // conversion used by the legacy fallback. It also lets us reuse the last
     // desktop image when only the cursor moves.
-    const bool dxgiCaptured = m_dxgiCapture->capture(src->name(), &image, &captureTiming);
+    const bool dxgiCaptured = m_dxgiCapture->capture(src->name(), src->geometry(), &image, &captureTiming);
     const QString backend = dxgiCaptured ? QStringLiteral("dxgi") : QStringLiteral("qscreen");
     if (backend != m_lastCaptureBackend) {
         m_lastCaptureBackend = backend;

@@ -2,6 +2,7 @@
 #define DXGI_DESKTOP_CAPTURE_H
 
 #include <QImage>
+#include <QRect>
 #include <QString>
 #include <vector>
 
@@ -19,13 +20,13 @@ public:
     DxgiDesktopCapture();
     ~DxgiDesktopCapture();
 
-    bool capture(const QString &outputName, QImage *image,
+    bool capture(const QString &outputName, const QRect &screenGeometry, QImage *image,
                  DesktopCaptureTiming *timing = nullptr);
     void reset();
 
 private:
 #ifdef Q_OS_WIN
-    bool initialize(const QString &outputName);
+    bool initialize(const QString &outputName, const QRect &screenGeometry);
     bool ensureStagingTexture(const D3D11_TEXTURE2D_DESC &sourceDescription);
     bool copyMappedFrame(const DXGI_OUTDUPL_FRAME_INFO &frameInfo,
                          const D3D11_MAPPED_SUBRESOURCE &mapped,
@@ -36,6 +37,9 @@ private:
     Microsoft::WRL::ComPtr<IDXGIOutputDuplication> m_duplication;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_staging;
     QString m_outputName;
+    QString m_requestedOutputName;
+    QString m_lastInitFailureName;
+    QRect m_requestedGeometry;
     QSize m_size;
     QImage m_lastImage;
 #endif

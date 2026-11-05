@@ -1729,7 +1729,13 @@ void CKernal::queueVideoFrame(const QImage &image, int frameRate, int bitRate,
         }
         return;
     }
-    if (m_useWebRtc && m_webTargetBitrate > 0) bitRate = qMin(bitRate, m_webTargetBitrate);
+    // LiveKit feedback is useful for camera video, but applying every short
+    // desktop feedback update here recreates NVENC and the pre-encoded track.
+    // That caused visible cursor stalls and repeatedly lowered text quality.
+    // Keep the selected desktop quality stable for the lifetime of the track.
+    if (m_useWebRtc && m_webTargetBitrate > 0 && !desktopContent) {
+        bitRate = qMin(bitRate, m_webTargetBitrate);
+    }
     // QImage is implicitly shared. Passing it by value keeps the worker frame
     // alive without a full-resolution deep copy on the GUI thread.
     Q_EMIT SIG_encodeVideoFrame(image, frameRate, bitRate, desktopContent,
@@ -1848,7 +1854,7 @@ void CKernal::slot_updateDesktopShareStats()
     const quint64 dropped = encoderDropped + replaced + late + failed;
     m_roomDialog->slot_setDesktopShareRuntimeStats(
                 m_desktopWidth, m_desktopHeight, m_desktopFrameRate,
-                m_useWebRtc && m_webTargetBitrate > 0 ? qMin(m_desktopBitRate, m_webTargetBitrate) : m_desktopBitRate,
+                m_desktopBitRate,
                 m_desktopEncoderName.isEmpty() ? QStringLiteral("等待编码器")
                                                 : m_desktopEncoderName,
                 static_cast<int>(captured), static_cast<int>(encoded),

@@ -13,8 +13,26 @@
 using Microsoft::WRL::ComPtr;
 
 namespace {
-bool outputMatchesRequestedName(const QString &requested, const DXGI_OUTPUT_DESC &description)
+QString hresultString(HRESULT result)
 {
+    return QStringLiteral("0x%1").arg(static_cast<qulonglong>(static_cast<unsigned long>(result)), 8, 16, QLatin1Char('0'));
+}
+
+void logDxgi(const QString &event, const QVariantMap &fields)
+{
+    DiagnosticLogger::instance().logEvent(event, fields);
+}
+
+bool outputMatchesRequestedName(const QString &requested, const QRect &requestedGeometry,
+                                const DXGI_OUTPUT_DESC &description)
+{
+    const QRect desktopGeometry(description.DesktopCoordinates.left,
+                                description.DesktopCoordinates.top,
+                                description.DesktopCoordinates.right - description.DesktopCoordinates.left,
+                                description.DesktopCoordinates.bottom - description.DesktopCoordinates.top);
+    if (!requestedGeometry.isEmpty() && desktopGeometry == requestedGeometry) {
+        return true;
+    }
     if (requested.isEmpty()) {
         return true;
     }
@@ -81,20 +99,33 @@ void DxgiDesktopCapture::reset()
     m_lastImage = QImage();
 }
 
-bool DxgiDesktopCapture::initialize(const QString &outputName)
+bool DxgiDesktopCapture::initialize(const QString &outputName, const QRect &screenGeometry)
 {
-    if (m_duplication && (outputName.isEmpty() || outputName == m_outputName)) {
+    if (m_duplication && (outputName.isEmpty() || outputName == m_requestedOutputName)
+            && (screenGeometry.isEmpty() || screenGeometry == m_requestedGeometry)) {
         return true;
     }
+    if (!m_duplication && outputName == m_lastInitFailureName) {
+        return false;
+    }
     reset();
+    m_requestedOutputName = outputName;
+    m_requestedGeometry = screenGeometry;
 
     // Enumerate adapters and create the device on the adapter that owns the
     // selected monitor. This avoids falling back to slow QScreen capture on
     // hybrid-GPU laptops.
     ComPtr<IDXGIFactory1> factory;
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+    const HRESULT factoryResult = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+    if (FAILED(factoryResult)) {
+        m_lastInitFailureName = outputName;
+        logDxgi(QStringLiteral("dxgi_factory_failed"),
+                {{QStringLiteral("screen"), outputName},
+                 {QStringLiteral("hresult"), hresultString(factoryResult)}});
         return false;
     }
+    bool sawOutput = false;
+    bool sawMatchingOutput = false;
     for (UINT adapterIndex = 0;; ++adapterIndex) {
         ComPtr<IDXGIAdapter1> adapter;
         if (factory->EnumAdapters1(adapterIndex, &adapter) == DXGI_ERROR_NOT_FOUND) {
@@ -104,10 +135,17 @@ bool DxgiDesktopCapture::initialize(const QString &outputName)
             continue;
         }
         DXGI_ADAPTER_DESC1 adapterDescription = {};
-        if (FAILED(adapter->GetDesc1(&adapterDescription)) ||
-            (adapterDescription.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
+        const HRESULT adapterResult = adapter->GetDesc1(&adapterDescription);
+        if (FAILED(adapterResult)) {
+            logDxgi(QStringLiteral("dxgi_adapter_query_failed"),
+                    {{QStringLiteral("adapter_index"), static_cast<int>(adapterIndex)},
+                     {QStringLiteral("hresult"), hresultString(adapterResult)}});
             continue;
         }
+        if (adapterDescription.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+            continue;
+        }
+        const QString adapterName = QString::fromWCharArray(adapterDescription.Description);
 
         for (UINT outputIndex = 0;; ++outputIndex) {
             ComPtr<IDXGIOutput> output;
@@ -118,10 +156,27 @@ bool DxgiDesktopCapture::initialize(const QString &outputName)
                 continue;
             }
             DXGI_OUTPUT_DESC description = {};
-            if (FAILED(output->GetDesc(&description)) ||
-                !outputMatchesRequestedName(outputName, description)) {
+            const HRESULT outputResult = output->GetDesc(&description);
+            if (FAILED(outputResult)) {
+                logDxgi(QStringLiteral("dxgi_output_query_failed"),
+                        {{QStringLiteral("adapter"), adapterName},
+                         {QStringLiteral("output_index"), static_cast<int>(outputIndex)},
+                         {QStringLiteral("hresult"), hresultString(outputResult)}});
                 continue;
             }
+            sawOutput = true;
+            const QString dxgiOutputName = QString::fromWCharArray(description.DeviceName);
+            logDxgi(QStringLiteral("dxgi_output_enumerated"),
+                    {{QStringLiteral("adapter"), adapterName},
+                     {QStringLiteral("output"), dxgiOutputName},
+                     {QStringLiteral("requested_screen"), outputName},
+                     {QStringLiteral("desktop_geometry"), QStringLiteral("%1,%2 %3x%4").arg(description.DesktopCoordinates.left).arg(description.DesktopCoordinates.top).arg(description.DesktopCoordinates.right - description.DesktopCoordinates.left).arg(description.DesktopCoordinates.bottom - description.DesktopCoordinates.top)},
+                     {QStringLiteral("requested_geometry"), QStringLiteral("%1,%2 %3x%4").arg(screenGeometry.x()).arg(screenGeometry.y()).arg(screenGeometry.width()).arg(screenGeometry.height())},
+                     {QStringLiteral("matching"), outputMatchesRequestedName(outputName, screenGeometry, description)}});
+            if (!outputMatchesRequestedName(outputName, screenGeometry, description)) {
+                continue;
+            }
+            sawMatchingOutput = true;
 
             D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
             const HRESULT deviceResult = D3D11CreateDevice(
@@ -129,20 +184,41 @@ bool DxgiDesktopCapture::initialize(const QString &outputName)
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
                 &m_device, &featureLevel, &m_context);
             if (FAILED(deviceResult)) {
+                logDxgi(QStringLiteral("dxgi_device_create_failed"),
+                        {{QStringLiteral("adapter"), adapterName},
+                         {QStringLiteral("output"), dxgiOutputName},
+                         {QStringLiteral("hresult"), hresultString(deviceResult)}});
                 reset();
                 continue;
             }
 
             ComPtr<IDXGIOutput1> output1;
-            if (FAILED(output.As(&output1)) ||
-                FAILED(output1->DuplicateOutput(m_device.Get(), &m_duplication))) {
+            const HRESULT output1Result = output.As(&output1);
+            const HRESULT duplicateOutputResult = SUCCEEDED(output1Result)
+                    ? output1->DuplicateOutput(m_device.Get(), &m_duplication)
+                    : output1Result;
+            if (FAILED(duplicateOutputResult)) {
+                logDxgi(QStringLiteral("dxgi_duplicate_output_failed"),
+                        {{QStringLiteral("adapter"), adapterName},
+                         {QStringLiteral("output"), dxgiOutputName},
+                         {QStringLiteral("hresult"), hresultString(duplicateOutputResult)}});
                 reset();
                 continue;
             }
             m_outputName = QString::fromWCharArray(description.DeviceName);
+            m_lastInitFailureName.clear();
+            logDxgi(QStringLiteral("dxgi_initialized"),
+                    {{QStringLiteral("adapter"), adapterName},
+                     {QStringLiteral("output"), m_outputName},
+                     {QStringLiteral("screen"), outputName}});
             return true;
         }
     }
+    m_lastInitFailureName = outputName;
+    logDxgi(QStringLiteral("dxgi_output_not_found"),
+            {{QStringLiteral("screen"), outputName},
+             {QStringLiteral("saw_output"), sawOutput},
+             {QStringLiteral("saw_matching_output"), sawMatchingOutput}});
     reset();
     return false;
 }
@@ -196,7 +272,7 @@ bool DxgiDesktopCapture::copyMappedFrame(const DXGI_OUTDUPL_FRAME_INFO &frameInf
     return true;
 }
 
-bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image,
+bool DxgiDesktopCapture::capture(const QString &outputName, const QRect &screenGeometry, QImage *image,
                                  DesktopCaptureTiming *timing)
 {
     QElapsedTimer totalTimer;
@@ -204,7 +280,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image,
     if (timing) {
         *timing = DesktopCaptureTiming();
     }
-    if (!image || !initialize(outputName)) {
+    if (!image || !initialize(outputName, screenGeometry)) {
         return false;
     }
 
@@ -289,7 +365,7 @@ bool DxgiDesktopCapture::capture(const QString &outputName, QImage *image,
 
 DxgiDesktopCapture::DxgiDesktopCapture() = default;
 DxgiDesktopCapture::~DxgiDesktopCapture() = default;
-bool DxgiDesktopCapture::capture(const QString &, QImage *, DesktopCaptureTiming *) { return false; }
+bool DxgiDesktopCapture::capture(const QString &, const QRect &, QImage *, DesktopCaptureTiming *) { return false; }
 void DxgiDesktopCapture::reset() {}
 
 #endif

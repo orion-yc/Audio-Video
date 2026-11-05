@@ -1,6 +1,7 @@
 #include "ckernal.h"
 #include "gateway_client.h"
 #include "rtc_session.h"
+#include "diagnostics.h"
 #include "userprofiledialog.h"
 #include <QInputDialog>
 #include <QMessageBox>
@@ -108,6 +109,10 @@ void CKernal::setupWebRtc() {
         const int capped=qBound(250000,rate,72000000);
         const int effective = m_activeVideoSource == VideoSource::Desktop
                 ? qMax(kMinimumDesktopFeedbackBitrate, capped) : capped;
+        DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_bitrate_feedback"),
+                                              {{QStringLiteral("requested_bps"), rate},
+                                               {QStringLiteral("effective_bps"), effective},
+                                               {QStringLiteral("desktop"), m_activeVideoSource == VideoSource::Desktop}});
         if(m_webTargetBitrate==0||qAbs(effective-m_webTargetBitrate)>m_webTargetBitrate/5){m_webTargetBitrate=effective;m_webBitrateClock.restart();}
     });
     connect(m_rtc,&RtcSession::SIG_videoSent,this,[this]{if(m_activeVideoSource==VideoSource::Desktop)++m_webSentFrames;});

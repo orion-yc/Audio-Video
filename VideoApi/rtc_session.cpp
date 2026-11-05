@@ -265,7 +265,10 @@ struct RtcSession::Impl : livekit::RoomDelegate {
         if(g!=generation||owner->m_generation.load()!=g||!room)return;
         try {
             auto lp=room->localParticipant().lock();if(!lp)return;
-            if(!video||w!=videoWidth||h!=videoHeight||screen!=videoScreen||fps!=videoFps||bitrate!=videoBitrate){
+            const bool encodingLayoutChanged = !video || w!=videoWidth || h!=videoHeight
+                    || screen!=videoScreen || fps!=videoFps;
+            const bool cameraBitrateChanged = !screen && bitrate != videoBitrate;
+            if(encodingLayoutChanged || cameraBitrateChanged){
                 if(videoTrack)lp->unpublishTrack(videoTrack->sid());
                 videoTrack.reset();video.reset();waitingForKeyframe=true;
                 videoWidth=w;videoHeight=h;videoScreen=screen;videoFps=fps;videoBitrate=bitrate;
