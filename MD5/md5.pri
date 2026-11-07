@@ -1,5 +1,7 @@
 HEADERS += \
-    $$PWD/md5.h
+    $$PWD/../include/MD5/md5.h
 
 SOURCES += \
-    $$PWD/md5.cpp
+    $$PWD/../src/MD5/md5.cpp
+
+INCLUDEPATH += $$PWD/../include/MD5

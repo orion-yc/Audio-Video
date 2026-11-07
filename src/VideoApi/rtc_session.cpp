@@ -1,5 +1,5 @@
 #include "rtc_session.h"
-#include "../diagnostics.h"
+#include "diagnostics.h"
 #include <QThread>
 #include <QTimer>
 #include <QPointer>

@@ -8,25 +8,27 @@ DEFINES += AUDIO_VIDEO_TESTING
 
 SOURCES += \
     network_recovery.cpp \
-    ../ckernal.cpp \
-    ../web_client.cpp \
-    ../logindialog.cpp \
-    ../demodialog.cpp \
-    ../roomdialog.cpp \
-    ../setuserdialog.cpp \
-    ../userprofiledialog.cpp \
-    ../usershow.cpp \
-    ../workthread.cpp
+    ../src/ckernal.cpp \
+    ../src/diagnostics.cpp \
+    ../src/web_client.cpp \
+    ../src/logindialog.cpp \
+    ../src/demodialog.cpp \
+    ../src/roomdialog.cpp \
+    ../src/setuserdialog.cpp \
+    ../src/userprofiledialog.cpp \
+    ../src/usershow.cpp \
+    ../src/workthread.cpp
 
 HEADERS += \
-    ../ckernal.h \
-    ../demodialog.h \
-    ../logindialog.h \
-    ../roomdialog.h \
-    ../setuserdialog.h \
-    ../userprofiledialog.h \
-    ../usershow.h \
-    ../workthread.h
+    ../include/ckernal.h \
+    ../include/demodialog.h \
+    ../include/diagnostics.h \
+    ../include/logindialog.h \
+    ../include/roomdialog.h \
+    ../include/setuserdialog.h \
+    ../include/userprofiledialog.h \
+    ../include/usershow.h \
+    ../include/workthread.h
 
 FORMS += \
     ../demodialog.ui \
@@ -38,12 +40,14 @@ FORMS += \
 RESOURCES += ../resources.qrc
 
 INCLUDEPATH += \
-    .. \
-    ../netapi \
-    ../MD5 \
-    ../uiapi \
-    ../AudioApi \
-    ../VideoApi
+    ../include \
+    ../include/netapi/net \
+    ../include/netapi/mediator \
+    ../include/netapi/gateway \
+    ../include/MD5 \
+    ../include/uiapi \
+    ../include/AudioApi \
+    ../include/VideoApi
 include(../netapi/netapi.pri)
 include(../MD5/MD5.pri)
 include(../uiapi/uiapi.pri)

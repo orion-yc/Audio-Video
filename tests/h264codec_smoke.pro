@@ -10,12 +10,13 @@ TARGET = h264codec_smoke
 
 SOURCES += \
     $$PWD/h264codec_smoke.cpp \
-    $$PWD/../VideoApi/h264codec.cpp
+    $$PWD/../src/VideoApi/h264codec.cpp \
+    $$PWD/../src/diagnostics.cpp
 
-HEADERS += $$PWD/../VideoApi/h264codec.h
+HEADERS += $$PWD/../include/VideoApi/h264codec.h $$PWD/../include/diagnostics.h
 
 FFMPEG_ROOT = $$PWD/../third_party/ffmpeg-master-latest-win64-lgpl-shared
-INCLUDEPATH += $$PWD/../VideoApi $$FFMPEG_ROOT/include
+INCLUDEPATH += $$PWD/../include $$PWD/../include/VideoApi $$FFMPEG_ROOT/include
 LIBS += $$FFMPEG_ROOT/lib/avcodec.lib \
     $$FFMPEG_ROOT/lib/avutil.lib \
     $$FFMPEG_ROOT/lib/swscale.lib

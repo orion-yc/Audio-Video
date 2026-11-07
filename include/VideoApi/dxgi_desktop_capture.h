@@ -6,7 +6,7 @@
 #include <QString>
 #include <vector>
 
-#include "../diagnostics.h"
+#include "diagnostics.h"
 
 #ifdef Q_OS_WIN
 #include <d3d11.h>

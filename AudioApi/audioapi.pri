@@ -10,12 +10,14 @@ LIBS += $$VCPKG_ROOT/lib/speex.lib ole32.lib uuid.lib
 
 
 HEADERS += \
-    $$PWD/audio_common.h \
-    $$PWD/audio_read.h \
-    $$PWD/system_audio_read.h \
-    $$PWD/audio_write.h
+    $$PWD/../include/AudioApi/audio_common.h \
+    $$PWD/../include/AudioApi/audio_read.h \
+    $$PWD/../include/AudioApi/system_audio_read.h \
+    $$PWD/../include/AudioApi/audio_write.h
 
 SOURCES += \
-    $$PWD/audio_read.cpp \
-    $$PWD/system_audio_read.cpp \
-    $$PWD/audio_write.cpp
+    $$PWD/../src/AudioApi/audio_read.cpp \
+    $$PWD/../src/AudioApi/system_audio_read.cpp \
+    $$PWD/../src/AudioApi/audio_write.cpp
+
+INCLUDEPATH += $$PWD/../include/AudioApi

@@ -1,23 +1,25 @@
 HEADERS += \
-    $$PWD/desk_read.h \
-    $$PWD/dxgi_desktop_capture.h \
-    $$PWD/h264codec.h \
-    $$PWD/myfacedetect.h \
-    $$PWD/video_common.h \
-    $$PWD/video_decode_worker.h \
-    $$PWD/rtc_session.h \
-    $$PWD/video_encode_thread.h \
-    $$PWD/video_read.h
+    $$PWD/../include/VideoApi/desk_read.h \
+    $$PWD/../include/VideoApi/dxgi_desktop_capture.h \
+    $$PWD/../include/VideoApi/h264codec.h \
+    $$PWD/../include/VideoApi/myfacedetect.h \
+    $$PWD/../include/VideoApi/video_common.h \
+    $$PWD/../include/VideoApi/video_decode_worker.h \
+    $$PWD/../include/VideoApi/rtc_session.h \
+    $$PWD/../include/VideoApi/video_encode_thread.h \
+    $$PWD/../include/VideoApi/video_read.h
 
 SOURCES += \
-    $$PWD/desk_read.cpp \
-    $$PWD/dxgi_desktop_capture.cpp \
-    $$PWD/h264codec.cpp \
-    $$PWD/myfacedetect.cpp \
-    $$PWD/video_decode_worker.cpp \
-    $$PWD/rtc_session.cpp \
-    $$PWD/video_encode_thread.cpp \
-    $$PWD/video_read.cpp
+    $$PWD/../src/VideoApi/desk_read.cpp \
+    $$PWD/../src/VideoApi/dxgi_desktop_capture.cpp \
+    $$PWD/../src/VideoApi/h264codec.cpp \
+    $$PWD/../src/VideoApi/myfacedetect.cpp \
+    $$PWD/../src/VideoApi/video_decode_worker.cpp \
+    $$PWD/../src/VideoApi/rtc_session.cpp \
+    $$PWD/../src/VideoApi/video_encode_thread.cpp \
+    $$PWD/../src/VideoApi/video_read.cpp
+
+INCLUDEPATH += $$PWD/../include/VideoApi
 
 !msvc {
     error("Audio-Video is built with Qt 6.11.1 MSVC 2022 x64 only.")
