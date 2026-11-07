@@ -1,5 +1,5 @@
 #include "desk_read.h"
-#include "../diagnostics.h"
+#include "diagnostics.h"
 
 #include <QCursor>
 #include <QElapsedTimer>

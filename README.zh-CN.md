@@ -109,10 +109,12 @@ H.264 编解码的独立冒烟测试工程位于 [tests/h264codec_smoke.pro](tes
 ## 目录说明
 
 ```text
-AudioApi/       麦克风采集、播放与 Speex 集成
-VideoApi/       摄像头与桌面采集、H.264 编解码、OpenCV 辅助功能
-netapi/         TCP 客户端与协议定义
-uiapi/          通用界面组件和应用样式
+include/        项目头文件，按 AudioApi、VideoApi、netapi 等模块分组
+src/            C++ 实现文件，目录结构与 include/ 对应
+AudioApi/       音频模块 qmake 配置
+VideoApi/       视频模块 qmake 配置
+netapi/         网络模块 qmake 配置
+uiapi/          通用界面组件 qmake 配置
 packaging/      运行库整理、安装脚本和发布构建脚本
 deploy/         服务端、数据库和 FRP 部署模板
 tests/          编解码冒烟测试

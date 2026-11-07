@@ -1,5 +1,5 @@
 #include "h264codec.h"
-#include "../diagnostics.h"
+#include "diagnostics.h"
 
 #include <QDebug>
 

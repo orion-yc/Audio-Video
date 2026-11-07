@@ -100,10 +100,12 @@ The H.264 encoder/decoder smoke project is available at [tests/h264codec_smoke.p
 ## Project Layout
 
 ```text
-AudioApi/       Microphone capture, playback, and Speex integration
-VideoApi/       Camera and desktop capture, H.264 encode/decode, OpenCV helpers
-netapi/         TCP client and protocol definitions
-uiapi/          Shared widgets and application styling
+include/        Project headers, grouped by AudioApi, VideoApi, netapi, and other modules
+src/            C++ implementations, mirroring the module layout under include/
+AudioApi/       Audio module qmake configuration
+VideoApi/       Video module qmake configuration
+netapi/         Network module qmake configuration
+uiapi/          Shared UI module qmake configuration
 packaging/      Runtime staging, installer script, and release builder
 deploy/         Server, database, and FRP deployment templates
 tests/          Focused codec smoke test

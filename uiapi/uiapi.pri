@@ -1,9 +1,11 @@
 HEADERS += \
-    $$PWD/appstyle.h \
-    $$PWD/customwidget.h \
-    $$PWD/latencylabel.h
+    $$PWD/../include/uiapi/appstyle.h \
+    $$PWD/../include/uiapi/customwidget.h \
+    $$PWD/../include/uiapi/latencylabel.h
 
 SOURCES += \
-    $$PWD/appstyle.cpp \
-    $$PWD/customwidget.cpp \
-    $$PWD/latencylabel.cpp
+    $$PWD/../src/uiapi/appstyle.cpp \
+    $$PWD/../src/uiapi/customwidget.cpp \
+    $$PWD/../src/uiapi/latencylabel.cpp
+
+INCLUDEPATH += $$PWD/../include/uiapi

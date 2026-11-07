@@ -1,5 +1,5 @@
 #include "video_encode_thread.h"
-#include "../diagnostics.h"
+#include "diagnostics.h"
 
 #include <QElapsedTimer>
 
