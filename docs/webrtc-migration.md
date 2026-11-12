@@ -18,7 +18,9 @@ The gateway and media adapter retain the actual room string.
 
 `GatewayClient` implements account registration/login, JWT authorization, profile updates,
 JPEG avatars, room creation/join/leave, and authorized WebSocket room chat. Requests have
-15-second timeouts, reject redirects, and ignore stale authentication responses. Tokens
+bounded deadlines (8 seconds per login attempt, 4 seconds for health checks, 15 seconds
+for other requests), reject redirects, and cancel stale authentication requests. A transient
+login failure is retried once within the existing 20-second UI deadline. Tokens
 and passwords are not persisted. A session-expiration response returns the user to login.
 JWTs are never truncated into the old 33-byte TCP token field.
 
@@ -59,7 +61,7 @@ synthetic IDR fixture, not real Windows desktop capture or a 4K performance benc
 Windows/MSVC packaging, Windows microphone/camera/WASAPI devices, real two-machine
 network interruption and 4K/60 fps/72 Mbps are still untested in this Linux environment.
 
-Build on Windows with `packaging/build-release-msvc.ps1 -Version 2.0.0`.
+Build on Windows with `packaging/build-release-msvc.ps1 -Version 2.0.1`.
 Run `tests/run-webrtc-integration.ps1` for native integration. It generates temporary users;
 use its JSON report to clean only those accounts and their avatar metadata/files.
 

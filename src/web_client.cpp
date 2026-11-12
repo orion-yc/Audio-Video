@@ -20,6 +20,14 @@ void CKernal::setupWebRtc() {
     m_audioRead->setPcmMode(true);m_systemAudioRead->setSampleRate(48000);
     connect(m_audioRead,&Audio_Read::SIG_pcmFrame,this,[this](const QByteArray &pcm){if(m_roomid)m_rtc->publishAudio(pcm);});
     connect(m_gateway,&GatewayClient::latencyMeasured,this,&CKernal::updateLatencyDisplay);
+    connect(m_gateway,&GatewayClient::requestDiagnostic,this,[](const QVariantMap &fields) {
+        DiagnosticLogger::instance().logEvent(QStringLiteral("gateway_request"), fields);
+    });
+    connect(m_rtc,&RtcSession::SIG_latencyMeasured,this,[this](int ms) {
+        if (!m_roomid) return;
+        m_mediaLatencyClock.restart();
+        m_roomDialog->slot_setLatency(ms, "media");
+    });
     connect(m_gateway,&GatewayClient::loggedIn,this,[this](qint64 id,const QString &name){
         m_loginDeadline->stop();m_loginTimeoutTimer->stop();m_loginPending=false;
         m_loginDialog->slot_setLoginPending(false);m_userid=static_cast<int>(id);m_name=name;m_loggedIn=true;
@@ -85,6 +93,10 @@ void CKernal::setupWebRtc() {
     });
     connect(m_rtc,&RtcSession::SIG_stateChanged,this,[this](RtcSession::State state,const QString &detail){
         m_roomDialog->slot_setMediaStatus(detail);
+        if (state != RtcSession::State::Connected) {
+            m_mediaLatencyClock.invalidate();
+            m_roomDialog->slot_setLatency(-1, "media");
+        }
         if(state==RtcSession::State::Connected){
             if(!m_roomid)slot_setJoinedRoom(1); // A local active-room marker; the actual room ID remains a QString.
             Q_EMIT SIG_resetVideoEncoder();

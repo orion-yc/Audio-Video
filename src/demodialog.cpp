@@ -44,9 +44,9 @@ demoDialog::demoDialog(QWidget *parent)
     this->setWindowFlags(Qt::FramelessWindowHint);
 }
 
-void demoDialog::slot_setLatency(int latencyMs)
+void demoDialog::slot_setLatency(int latencyMs, const QString &source)
 {
-    m_latencyLabel->setLatency(latencyMs);
+    m_latencyLabel->setLatency(latencyMs, source);
 }
 
 demoDialog::~demoDialog()

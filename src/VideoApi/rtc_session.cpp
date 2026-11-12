@@ -8,6 +8,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <functional>
@@ -15,6 +16,7 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <set>
 #include <livekit/livekit.h>
 
 namespace {
@@ -22,6 +24,35 @@ struct SdkLifetime {
     SdkLifetime() { livekit::initialize(livekit::LogLevel::Warn); }
     ~SdkLifetime() { livekit::shutdown(); }
 };
+
+double mediaRttMs(const livekit::SessionStats &stats) {
+    double selectedRtt = -1.0;
+    double reportRtt = -1.0;
+    for (const auto *records : {&stats.publisher_stats, &stats.subscriber_stats}) {
+        std::set<std::string> selectedPairs;
+        for (const auto &record : *records) {
+            if (const auto *transport = std::get_if<livekit::RtcTransportStats>(&record.stats))
+                if (!transport->transport.selected_candidate_pair_id.empty())
+                    selectedPairs.insert(transport->transport.selected_candidate_pair_id);
+        }
+        for (const auto &record : *records) {
+            if (const auto *pair = std::get_if<livekit::RtcCandidatePairStats>(&record.stats)) {
+                const auto &p = pair->candidate_pair;
+                const bool selected = selectedPairs.empty()
+                    ? p.nominated && p.state == livekit::IceCandidatePairState::Succeeded
+                    : selectedPairs.count(pair->rtc.id) != 0;
+                if (selected && std::isfinite(p.current_round_trip_time)
+                        && p.current_round_trip_time >= 0.0 && p.responses_received > 0)
+                    selectedRtt = qMax(selectedRtt, p.current_round_trip_time * 1000.0);
+            } else if (const auto *remote = std::get_if<livekit::RtcRemoteInboundRtpStats>(&record.stats)) {
+                const double seconds = remote->remote_inbound.round_trip_time;
+                if (std::isfinite(seconds) && seconds > 0.0)
+                    reportRtt = qMax(reportRtt, seconds * 1000.0);
+            }
+        }
+    }
+    return selectedRtt >= 0.0 ? selectedRtt : reportRtt;
+}
 }
 struct RtcSession::Impl : livekit::RoomDelegate {
     RtcSession *owner;
@@ -52,8 +83,7 @@ struct RtcSession::Impl : livekit::RoomDelegate {
         QObject::connect(&thread,&QThread::finished,worker,&QObject::deleteLater);
         feedback->setInterval(100);
         QObject::connect(feedback,&QTimer::timeout,worker,[this] {
-            if(!video)return;
-            try {
+            if(video) try {
                 auto f=video->takeFeedback();
                 if(f.keyframe_requested) post([](RtcSession *o){Q_EMIT o->SIG_keyframeRequested();});
                 if(f.rate_control && f.rate_control->target_bitrate_bps>0) {
@@ -91,7 +121,7 @@ struct RtcSession::Impl : livekit::RoomDelegate {
             if (statsFuture->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
                 try {
                     const livekit::SessionStats stats = statsFuture->get();
-                    double rttMs = -1.0;
+                    const double rttMs = mediaRttMs(stats);
                     double lossPercent = -1.0;
                     double jitterMs = -1.0;
                     quint64 bytesSent = 0;
@@ -107,9 +137,6 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                                 }
                             } else if constexpr (std::is_same_v<T, livekit::RtcRemoteInboundRtpStats>) {
                                 if (typed.stream.kind == "video") {
-                                    if (typed.remote_inbound.round_trip_time > 0.0) {
-                                        rttMs = typed.remote_inbound.round_trip_time * 1000.0;
-                                    }
                                     if (typed.received.packets_received > 0 ||
                                         typed.remote_inbound.fraction_lost >= 0.0) {
                                         lossPercent = typed.remote_inbound.fraction_lost * 100.0;
@@ -120,10 +147,6 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                                     if (typed.received.jitter > 0.0) {
                                         jitterMs = typed.received.jitter * 1000.0;
                                     }
-                                }
-                            } else if constexpr (std::is_same_v<T, livekit::RtcCandidatePairStats>) {
-                                if (rttMs < 0.0 && typed.candidate_pair.current_round_trip_time > 0.0) {
-                                    rttMs = typed.candidate_pair.current_round_trip_time * 1000.0;
                                 }
                             }
                         }, record.stats);
@@ -145,6 +168,13 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                                 rttMs, lossPercent, jitterMs, bitrate,
                                 frameDelta, byteDelta,
                                 owner->m_videoPending.load() ? 1 : 0);
+                    const int latency = rttMs >= 0.0 && rttMs < 2147483647.0 ? qRound(rttMs) : -1;
+                    post([latency](RtcSession *o) {
+                        if (o->state() != State::Connected) return;
+                        Q_EMIT o->SIG_latencyMeasured(latency);
+                        DiagnosticLogger::instance().logEvent(QStringLiteral("media_latency"),
+                                                              {{QStringLiteral("rtt_ms"), latency}});
+                    });
                 } catch (const std::exception &e) {
                     DiagnosticLogger::instance().logEvent(
                                 QStringLiteral("livekit_stats_error"),

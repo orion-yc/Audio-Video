@@ -359,6 +359,7 @@ private:
     int                             m_pendingRoomId;
 
     void updateLatencyDisplay(int latencyMs);
+    QElapsedTimer m_mediaLatencyClock;
     void resetDesktopShareStats();
     void queueVideoFrame(const QImage &image, int frameRate, int bitRate,
                          bool desktopContent);

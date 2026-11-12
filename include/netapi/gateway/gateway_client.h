@@ -5,6 +5,8 @@
 #include <QUrl>
 #include <QTimer>
 #include <QWebSocket>
+#include <QSet>
+#include <QVariantMap>
 #include <functional>
 
 // HTTPS control plane. Session JWTs stay in memory and are never written to config.ini.
@@ -42,17 +44,21 @@ signals:
     void failed(QString operation, QString message);
     void sessionExpired();
     void latencyMeasured(int ms);
+    void requestDiagnostic(QVariantMap fields);
 private:
     using Result = std::function<void(int, QByteArray)>;
     void request(const QByteArray &method, const QString &path, const QByteArray &body,
                  const QString &operation, Result done, bool authorized = true,
-                 const QByteArray &contentType = "application/json");
+                 const QByteArray &contentType = "application/json", int attempt = 0);
     void openChat();
     QWebSocket *m_chat = nullptr;
     QTimer m_chatRetry;
     quint64 m_roomGeneration = 0;
     quint64 m_avatarVersion = 0;
     QNetworkAccessManager m_http;
+    QNetworkAccessManager m_healthHttp;
+    QSet<QNetworkReply *> m_requests;
+    bool m_healthPending = false;
     QUrl m_base { "https://video.onnotify.top" };
     QByteArray m_token;
     QString m_room;

@@ -37,6 +37,7 @@ signals:
     void SIG_bitrateRequested(int bitrate);
     void SIG_videoSent();
     void SIG_statsUpdated(double fps, double bitrate, double packetLoss, double jitterMs, double rttMs);
+    void SIG_latencyMeasured(int ms);
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

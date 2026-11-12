@@ -4,13 +4,14 @@
 #include <QJsonDocument>
 #include <QElapsedTimer>
 #include <QSharedPointer>
+#include <QNetworkProxy>
 
 namespace {
 QByteArray json(const QJsonObject &o) { return QJsonDocument(o).toJson(QJsonDocument::Compact); }
 QJsonObject object(const QByteArray &data) { return QJsonDocument::fromJson(data).object(); }
 QString roomPath(const QString &id) { return "/v1/rooms/" + QString::fromLatin1(QUrl::toPercentEncoding(id)); }
 }
-GatewayClient::GatewayClient(QObject *parent) : QObject(parent), m_http(this) {
+GatewayClient::GatewayClient(QObject *parent) : QObject(parent), m_http(this), m_healthHttp(this) {
     m_chatRetry.setSingleShot(true);m_chatRetry.setInterval(1500);
     connect(&m_chatRetry,&QTimer::timeout,this,&GatewayClient::openChat);
 }
@@ -23,31 +24,105 @@ void GatewayClient::setBaseUrl(const QUrl &url) {
 }
 void GatewayClient::request(const QByteArray &method, const QString &path, const QByteArray &body,
                             const QString &operation, Result done, bool authorized,
-                            const QByteArray &contentType) {
+                            const QByteArray &contentType, int attempt) {
     if (authorized && !authenticated()) { Q_EMIT failed(operation, QStringLiteral("请先登录")); return; }
     QUrl url(m_base); url.setPath(path, QUrl::StrictMode);
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
     req.setHeader(QNetworkRequest::UserAgentHeader, "Audio-Video/2.0 Qt");
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    req.setTransferTimeout(15000);
+    const int timeoutMs = operation == "health" ? 4000 : operation == "login" ? 8000 : 15000;
+    req.setTransferTimeout(timeoutMs);
     if (authorized) req.setRawHeader("Authorization", "Bearer " + m_token);
     const quint64 epoch = m_epoch;
     auto clock = QSharedPointer<QElapsedTimer>::create(); clock->start();
-    QNetworkReply *reply = m_http.sendCustomRequest(req, method, body);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch, operation, done, clock]() {
+    auto &http = operation == "health" ? m_healthHttp : m_http;
+    const int proxyType = static_cast<int>(http.proxy().type());
+    QNetworkReply *reply = http.sendCustomRequest(req, method, body);
+    m_requests.insert(reply);
+    auto timings = QSharedPointer<QVariantMap>::create();
+    timings->insert("phase", "connecting");
+    auto mark = [clock, timings](const QString &phase) {
+        timings->insert("phase", phase);
+        timings->insert(phase + "_ms", clock->elapsed());
+    };
+    connect(reply, &QNetworkReply::socketStartedConnecting, this, [mark] { mark("tcp_connect"); });
+    connect(reply, &QNetworkReply::encrypted, this, [mark] { mark("tls_ready"); });
+    connect(reply, &QNetworkReply::requestSent, this, [mark] { mark("request_sent"); });
+    connect(reply, &QNetworkReply::metaDataChanged, this, [mark] { mark("response_headers"); });
+    // Qt's transfer timeout measures inactivity. This also bounds a slow trickle response.
+    auto *deadline = new QTimer(reply);
+    deadline->setSingleShot(true);
+    connect(deadline, &QTimer::timeout, reply, [reply] {
+        reply->setProperty("gatewayTimedOut", true);
+        reply->abort();
+    });
+    deadline->start(timeoutMs);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch, operation, done, clock,
+                                                  timings, method, path, body, authorized,
+                                                  contentType, attempt, deadline, proxyType]() {
+        deadline->stop();
+        m_requests.remove(reply);
+        if (operation == "health") m_healthPending = false;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray data = reply->readAll();
-        const auto error = reply->error(); const QString detail = reply->errorString();
+        const auto error = reply->error();
+        const bool timedOut = reply->property("gatewayTimedOut").toBool()
+                || error == QNetworkReply::TimeoutError;
+        const bool success = status >= 200 && status < 300 && error == QNetworkReply::NoError;
+        const bool transient = timedOut || status == 502 || status == 503 || status == 504
+                || (status >= 520 && status <= 524)
+                || (status == 0 && (error == QNetworkReply::TemporaryNetworkFailureError
+                    || error == QNetworkReply::RemoteHostClosedError
+                    || error == QNetworkReply::ConnectionRefusedError));
+        QVariantMap fields = *timings;
+        fields.insert("operation", operation);
+        fields.insert("host", reply->url().host());
+        fields.insert("port", reply->url().port(reply->url().scheme() == "https" ? 443 : 80));
+        fields.insert("elapsed_ms", clock->elapsed());
+        fields.insert("http_status", status);
+        fields.insert("network_error", static_cast<int>(error));
+        fields.insert("timed_out", timedOut);
+        fields.insert("success", success);
+        fields.insert("attempt", attempt + 1);
+        fields.insert("cancelled", epoch != m_epoch);
+        fields.insert("configured_proxy_type", proxyType);
+        fields.insert("cloudflare_ray", QString::fromLatin1(reply->rawHeader("CF-Ray")).left(128));
+        Q_EMIT requestDiagnostic(fields);
         reply->deleteLater();
         if (epoch != m_epoch) return;
         if (operation == "health")
-            Q_EMIT latencyMeasured(static_cast<int>(clock->elapsed()));
-        if (status == 401 && authenticated()) { logout(); Q_EMIT sessionExpired(); return; }
+            Q_EMIT latencyMeasured(success ? static_cast<int>(clock->elapsed()) : -2);
+        // Only login is safe to retry here. Never replay registration or room/profile mutations.
+        if (operation == "login" && attempt == 0 && transient) {
+            m_http.clearConnectionCache();
+            QTimer::singleShot(250, this, [=] {
+                if (epoch == m_epoch)
+                    request(method, path, body, operation, done, authorized, contentType, attempt + 1);
+            });
+            return;
+        }
+        if (status == 401 && authorized && authenticated()) { logout(); Q_EMIT sessionExpired(); return; }
         if (status == 404 && operation == "avatar-fetch") { done(status, {}); return; }
         if (status < 200 || status >= 300 || error != QNetworkReply::NoError) {
             QString message = object(data).value("error").toString();
-            if (message.isEmpty()) message = status ? QString("HTTP %1").arg(status) : detail;
+            if (status == 401 && operation == "login")
+                message = QStringLiteral("手机号或密码不正确，请检查后重试。");
+            else if (status >= 500)
+                message = QStringLiteral("网关或上游服务暂时不可用（HTTP %1，%2），请稍后重试。")
+                        .arg(status).arg(reply->url().host());
+            else if (timedOut)
+                message = QStringLiteral("连接网关 %1 超时（%2 毫秒，第 %3 次尝试）。请检查网络，详细阶段已记入诊断日志。")
+                        .arg(reply->url().host()).arg(clock->elapsed()).arg(attempt + 1);
+            else if (status == 0) {
+                const QString reason = error == QNetworkReply::HostNotFoundError ? QStringLiteral("域名解析失败")
+                    : error == QNetworkReply::SslHandshakeFailedError ? QStringLiteral("TLS 安全连接失败")
+                    : (error >= QNetworkReply::ProxyConnectionRefusedError && error <= QNetworkReply::UnknownProxyError)
+                        ? QStringLiteral("代理连接失败，请检查系统代理") : QStringLiteral("网络连接失败");
+                message = QStringLiteral("%1：%2（错误码 %3），请检查网络或服务器。")
+                        .arg(reason, reply->url().host()).arg(static_cast<int>(error));
+            }
+            if (message.isEmpty()) message = QString("HTTP %1").arg(status);
             Q_EMIT failed(operation, message); return;
         }
         done(status, data);
@@ -112,6 +187,8 @@ void GatewayClient::logout() {
     ++m_epoch;++m_roomGeneration;m_chatRetry.stop();
     if(m_chat){m_chat->disconnect(this);m_chat->close();m_chat->deleteLater();m_chat=nullptr;}
     m_token.clear();m_room.clear();m_userId=0;
+    const auto pending = m_requests;
+    for (auto *reply : pending) reply->abort();
 }
 
 void GatewayClient::openChat() {
@@ -143,4 +220,8 @@ void GatewayClient::sendChat(const QString &message) {
     Q_EMIT chatSent(message);
 }
 
-void GatewayClient::ping() { request("GET","/healthz",{},"health",[](int,const QByteArray &){},false); }
+void GatewayClient::ping() {
+    if (m_healthPending) return;
+    m_healthPending = true;
+    request("GET","/healthz",{},"health",[](int,const QByteArray &){},false);
+}

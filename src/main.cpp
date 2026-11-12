@@ -10,6 +10,7 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     a.setApplicationName("Audio-Video");
+    a.setApplicationVersion("2.0.1");
     a.setApplicationDisplayName("Audio-Video");
     // Keep the runtime window icon consistent with the packaged executable.
     a.setWindowIcon(QIcon(QStringLiteral(":/images/app-icon.png")));

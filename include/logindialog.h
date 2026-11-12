@@ -35,7 +35,7 @@ signals:
 
 public:
     void closeEvent(QCloseEvent *event);
-    void slot_setLatency(int latencyMs);
+    void slot_setLatency(int latencyMs, const QString &source = {});
     void slot_setLoginPending(bool pending);
     void slot_showLoginFor(const QString &tel);
 

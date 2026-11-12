@@ -32,6 +32,8 @@
 #include <cstdlib>
 #include "appstyle.h"
 #include "ckernal.h"
+#include "gateway_client.h"
+#include "rtc_session.h"
 
 int main(int argc, char** argv)
 {
@@ -162,6 +164,31 @@ int main(int argc, char** argv)
     auto* button = kernel->m_loginDialog->findChild<QPushButton*>("pb_commit");
     check(button && button->isEnabled() && button->text() == QString::fromUtf8("登录"),
           "total timeout restores login button");
+
+    kernel->m_useWebRtc = true;
+    kernel->setupWebRtc();
+    kernel->m_gateway->setBaseUrl(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+    kernel->m_roomid = 1;
+    kernel->m_rtc->SIG_latencyMeasured(37);
+    kernel->updateLatencyDisplay(1600);
+    check(latency->text().contains("37 ms") && latency->text().contains(QString::fromUtf8("媒体")),
+          "slow gateway cannot overwrite room media RTT");
+    auto *loginLatency = kernel->m_loginDialog->findChild<LatencyLabel*>();
+    check(loginLatency->text().contains("1600 ms") && loginLatency->text().contains(QString::fromUtf8("网关")),
+          "gateway latency is labelled and high values are preserved");
+    kernel->m_rtc->SIG_latencyMeasured(1250);
+    check(latency->text().contains("1250 ms"), "high media RTT is preserved without clamping");
+    kernel->m_rtc->SIG_stateChanged(RtcSession::State::Reconnecting, "reconnecting");
+    check(latency->text().contains("--"), "reconnect clears stale media RTT");
+    kernel->m_mediaLatencyClock.invalidate();
+    kernel->slot_measureLatency();
+    check(latency->text().contains("--"), "missing media samples do not retain old latency");
+    kernel->m_roomid = 0;
+    kernel->webLogin("12345678901", "test-password");
+    QEventLoop webTimeout;
+    QTimer::singleShot(500, &webTimeout, &QEventLoop::quit);
+    webTimeout.exec();
+    check(!kernel->m_loginPending && button->isEnabled(), "HTTP login total deadline restores login button");
     kernel->slot_destroy();
     return 0;
 }

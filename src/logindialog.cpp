@@ -116,9 +116,9 @@ LoginDialog::LoginDialog(QWidget *parent) :
     on_pb_clear_register_clicked();
 }
 
-void LoginDialog::slot_setLatency(int latencyMs)
+void LoginDialog::slot_setLatency(int latencyMs, const QString &source)
 {
-    m_latencyLabel->setLatency(latencyMs);
+    m_latencyLabel->setLatency(latencyMs, source);
 }
 
 void LoginDialog::slot_setLoginPending(bool pending)

@@ -11,7 +11,7 @@ class LatencyLabel : public QLabel
 public:
     explicit LatencyLabel(QWidget *parent = nullptr);
 
-    void setLatency(int latencyMs);
+    void setLatency(int latencyMs, const QString &source = {});
 
 signals:
     void clicked();

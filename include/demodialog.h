@@ -43,7 +43,7 @@ public slots:
 public slots:
     void slot_setInfo(QString name, int iconid);
     void slot_setAvatarImage(const QImage &avatar);
-    void slot_setLatency(int latencyMs);
+    void slot_setLatency(int latencyMs, const QString &source = {});
 private:
     Ui::demoDialog *ui;
     LatencyLabel *m_latencyLabel;

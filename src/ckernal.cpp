@@ -435,7 +435,12 @@ void CKernal::slot_destroy()
 
 void CKernal::slot_measureLatency()
 {
-    if (m_useWebRtc) { if (m_gateway && m_loggedIn) m_gateway->ping(); return; }
+    if (m_useWebRtc) {
+        if (m_gateway && !m_loginPending) m_gateway->ping();
+        if (m_roomid && (!m_mediaLatencyClock.isValid() || m_mediaLatencyClock.elapsed() > 5000))
+            m_roomDialog->slot_setLatency(-1, "media");
+        return;
+    }
     // Login owns the only server connection until the main control socket has
     // authenticated. Do not let a probe race the login connection.
     if (!m_loggedIn || m_loginPending) {
@@ -494,12 +499,12 @@ void CKernal::slot_latencyTimeout()
 void CKernal::updateLatencyDisplay(int latencyMs)
 {
     if (m_loginDialog) {
-        m_loginDialog->slot_setLatency(latencyMs);
+        m_loginDialog->slot_setLatency(latencyMs, m_useWebRtc ? "gateway" : "");
     }
     if (m_demoDialog) {
-        m_demoDialog->slot_setLatency(latencyMs);
+        m_demoDialog->slot_setLatency(latencyMs, m_useWebRtc ? "gateway" : "");
     }
-    if (m_roomDialog) {
+    if (m_roomDialog && (!m_useWebRtc || !m_roomid)) {
         m_roomDialog->slot_setLatency(latencyMs);
     }
 }
@@ -2398,8 +2403,8 @@ void CKernal::beginControlRecovery()
 
 void CKernal::failLogin()
 {
-    if (m_useWebRtc && m_gateway) m_gateway->logout();
     if (!m_loginPending) return;
+    if (m_useWebRtc && m_gateway) m_gateway->logout();
     m_loginPending = false;
     m_loginRequest.clear();
     m_loginTimeoutTimer->stop();

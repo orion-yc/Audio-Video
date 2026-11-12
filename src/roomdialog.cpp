@@ -279,9 +279,9 @@ RoomDialog::RoomDialog(QWidget *parent) :
     //    slot_addUser(user5);
 }
 
-void RoomDialog::slot_setLatency(int latencyMs)
+void RoomDialog::slot_setLatency(int latencyMs, const QString &source)
 {
-    m_latencyLabel->setLatency(latencyMs);
+    m_latencyLabel->setLatency(latencyMs, source);
 }
 
 void RoomDialog::slot_setDesktopSharePending(int frameRate, int bitRate)
@@ -599,11 +599,6 @@ void RoomDialog::setTopStatusVisible(bool visible)
     }
     if (m_deskStatusLabel) {
         m_deskStatusLabel->setVisible(visible);
-    }
-    if (m_latencyLabel) {
-        m_latencyLabel->setToolTip(visible
-                ? "每 5 秒自动测量到会议服务器的连接延迟；点击隐藏共享状态"
-                : "每 5 秒自动测量到会议服务器的连接延迟；点击显示共享状态");
     }
 }
 

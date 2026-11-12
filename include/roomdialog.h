@@ -61,7 +61,7 @@ public slots:
     void slot_clearBigImage(int userid);
     void slot_setCaptureState(bool active);
     void slot_setSystemAudioError(const QString &message);
-    void slot_setLatency(int latencyMs);
+    void slot_setLatency(int latencyMs, const QString &source = {});
     void slot_setDesktopSharePending(int frameRate, int bitRate);
     void slot_setDesktopShareStatus(int width, int height, int frameRate, int bitRate,
                                     const QString &encoderName);

@@ -13,11 +13,13 @@
 Windows 构建：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 2.0.0
+.\packaging\build-release-msvc.ps1 -Version 2.0.1
 ```
 
 脚本会下载并校验固定版本的原生 SDK，编译后将 `livekit.dll`、`livekit_ffi.dll`、
 `Qt6WebSockets.dll` 与现有运行库一起打包。只配置 SDK 目录的旧占位适配器已替换为实际实现。
+
+登录超时和左上角延迟指标的解释见 [网络诊断说明](docs/login-network-diagnostics.md)。
 
 联调工程：`tests/webrtc_integration.pro`。它创建两个临时账户，通过实际 HTTP API 验证
 登录、资料、头像和双向聊天，并让观看端在共享开始后再加入，检查 H.264 解码及 Opus 收音。
