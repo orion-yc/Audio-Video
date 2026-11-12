@@ -304,6 +304,8 @@ CKernal::CKernal(QObject *parent) : QObject(parent)
             m_videoEncodeThread.get(), &VideoEncodeThread::slot_encodeFrame);
     connect(this, &CKernal::SIG_resetVideoEncoder,
             m_videoEncodeThread.get(), &VideoEncodeThread::slot_reset);
+    connect(this, &CKernal::SIG_requestVideoKeyframe,
+            m_videoEncodeThread.get(), &VideoEncodeThread::slot_requestKeyFrame);
     connect(m_videoEncodeThread.get(), &VideoEncodeThread::SIG_videoEncoded,
             this, &CKernal::slot_sendH264Frame);
     connect(m_videoEncodeThread.get(), &VideoEncodeThread::SIG_encodeFinished,
@@ -1838,7 +1840,7 @@ void CKernal::resetDesktopShareStats()
     quint64 late = 0;
     quint64 failed = 0;
     m_sendVideoThread->takeDesktopStats(&sent, &replaced, &late, &failed);
-    if (m_useWebRtc) sent = m_webSentFrames.exchange(0);
+    if (m_useWebRtc) m_webQueuedFrames.exchange(0);
 }
 
 void CKernal::slot_updateDesktopShareStats()
@@ -1857,13 +1859,20 @@ void CKernal::slot_updateDesktopShareStats()
     const quint64 encoded = m_desktopEncodedFrames.exchange(0);
     const quint64 encoderDropped = m_desktopEncoderDroppedFrames.exchange(0);
     const quint64 dropped = encoderDropped + replaced + late + failed;
+    if (m_useWebRtc) sent = m_webQueuedFrames.exchange(0);
     m_roomDialog->slot_setDesktopShareRuntimeStats(
                 m_desktopWidth, m_desktopHeight, m_desktopFrameRate,
                 m_desktopBitRate,
                 m_desktopEncoderName.isEmpty() ? QStringLiteral("等待编码器")
                                                 : m_desktopEncoderName,
                 static_cast<int>(captured), static_cast<int>(encoded),
-                static_cast<int>(sent), static_cast<int>(dropped));
+                static_cast<int>(sent), static_cast<int>(dropped), m_useWebRtc);
+
+    if (m_useWebRtc && m_rtc->state() != RtcSession::State::Connected) {
+        m_desktopNoCaptureIntervals = m_desktopNoEncodeIntervals = m_desktopNoSendIntervals = 0;
+        m_roomDialog->slot_setMediaStatus("音视频连接尚未就绪，桌面共享等待连接恢复…");
+        return;
+    }
 
     if (captured == 0) {
         ++m_desktopNoCaptureIntervals;
@@ -1893,8 +1902,12 @@ void CKernal::slot_updateDesktopShareStats()
         Q_EMIT SIG_resetVideoEncoder();
     } else if (m_desktopNoSendIntervals >= kDesktopStallIntervalsBeforeRecovery) {
         m_desktopNoSendIntervals = 0;
+        if (m_useWebRtc) {
+            m_roomDialog->slot_setMediaStatus("LiveKit 视频入队暂停，正在请求关键帧…");
+            Q_EMIT SIG_requestVideoKeyframe();
+            return;
+        }
         m_roomDialog->slot_setMediaStatus("视频通道停滞，正在重新连接…");
-        if (m_useWebRtc) { Q_EMIT SIG_resetVideoEncoder(); return; }
         m_avChannelRegistered[1].store(false);
         if (m_tcpAV[1]) {
             m_tcpAV[1]->CloseNet();

@@ -13,7 +13,7 @@
 Windows 构建：
 
 ```powershell
-.\packaging\build-release-msvc.ps1 -Version 2.0.1
+.\packaging\build-release-msvc.ps1 -Version 2.0.2
 ```
 
 脚本会下载并校验固定版本的原生 SDK，编译后将 `livekit.dll`、`livekit_ffi.dll`、

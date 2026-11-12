@@ -46,7 +46,9 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
     bool joiningDecoderStarted = false;
     bool joiningDecoderProducedImage = false;
     int joiningDecoderKeyFrame = -1;
+    bool requestedKeyFrameProduced = false;
     for (int frame = 0; frame < 130; ++frame) {
+        if (frame == 10) encoder.requestKeyFrame();
         QByteArray encoded;
         bool keyFrame = false;
         QSize encodedSize;
@@ -60,6 +62,7 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
             *backend = encoder.backendName();
         }
         if (produced && keyFrame && frame > 0) {
+            if (frame >= 10 && frame <= 12) requestedKeyFrameProduced = true;
             joiningDecoderStarted = true;
             if (joiningDecoderKeyFrame < 0) {
                 joiningDecoderKeyFrame = frame;
@@ -73,7 +76,7 @@ bool encodeAndDecode(const QImage &source, bool desktopContent,
             }
         }
     }
-    return !decoded->isNull() && joiningDecoderStarted && joiningDecoderProducedImage
+    return !decoded->isNull() && requestedKeyFrameProduced && joiningDecoderStarted && joiningDecoderProducedImage
             && joiningDecoderKeyFrame <= 30;
 }
 

@@ -34,6 +34,7 @@
 #include "ckernal.h"
 #include "gateway_client.h"
 #include "rtc_session.h"
+#include "track_publication_state.h"
 
 int main(int argc, char** argv)
 {
@@ -58,6 +59,25 @@ int main(int argc, char** argv)
         report.flush();
         if (!ok) std::_Exit(1);
     };
+
+    TrackPublicationState publication;
+    check(publication.beginAttempt(100) && !publication.ready() && !publication.beginAttempt(101),
+          "track construction does not imply publication or allow a concurrent attempt");
+    publication.failed(10100);
+    check(!publication.beginAttempt(11000) && !publication.ready(),
+          "publication backoff starts after a blocking timeout finishes");
+    check(publication.beginAttempt(11600) && !publication.ready(),
+          "retrying track stays unavailable until server acknowledgement");
+    publication.failed(21600);
+    check(publication.beginAttempt(23100), "second failed publication can retry after backoff");
+    publication.failed(33100);
+    check(publication.exhausted() && !publication.beginAttempt(99999),
+          "persistent publication failures terminate after three attempts");
+    publication.reset();
+    check(publication.beginAttempt(0), "a new share resets publication retry state");
+    publication.succeeded();
+    check(publication.ready() && !publication.beginAttempt(10),
+          "acknowledged track becomes ready and is not republished per frame");
 
     auto* latency = kernel->m_roomDialog->findChild<LatencyLabel*>();
     auto* shareStatus = kernel->m_roomDialog->findChild<QLabel*>("lb_deskStatus");
@@ -183,6 +203,30 @@ int main(int argc, char** argv)
     kernel->m_mediaLatencyClock.invalidate();
     kernel->slot_measureLatency();
     check(latency->text().contains("--"), "missing media samples do not retain old latency");
+    kernel->m_desktopStatsTimer->stop();
+    kernel->m_activeVideoSource = CKernal::VideoSource::Desktop;
+    kernel->resetDesktopShareStats();
+    int keyframeRequests = 0;
+    QObject::connect(kernel, &CKernal::SIG_requestVideoKeyframe, &app, [&] { ++keyframeRequests; });
+    const int resetsBefore = resets;
+    for (int i = 0; i < 8; ++i) kernel->m_rtc->SIG_keyframeRequested();
+    check(keyframeRequests == 1 && resets == resetsBefore,
+          "repeated keyframe feedback is coalesced without recreating the encoder");
+    for (int i = 0; i < 6; ++i) {
+        kernel->m_desktopCapturedFrames = 60;
+        kernel->slot_updateDesktopShareStats();
+    }
+    check(resets == resetsBefore && kernel->m_desktopNoEncodeIntervals == 0,
+          "connecting media does not trigger the encoder stall watchdog");
+    for (int i = 0; i < 59; ++i) kernel->m_rtc->SIG_videoQueued();
+    kernel->m_desktopCapturedFrames = 60;
+    kernel->m_desktopEncodedFrames = 60;
+    kernel->slot_updateDesktopShareStats();
+    check(kernel->m_webQueuedFrames.load() == 0 && shareStatus->text().contains(QString::fromUtf8("入队 59"))
+          && !shareStatus->text().contains(QString::fromUtf8("发送 59")),
+          "watchdog consumes LiveKit queue progress and labels it separately from network sending");
+    kernel->m_activeVideoSource = CKernal::VideoSource::None;
+
     kernel->m_roomid = 0;
     kernel->webLogin("12345678901", "test-password");
     QEventLoop webTimeout;

@@ -20,3 +20,4 @@ INCLUDEPATH += $$PWD/../include $$PWD/../include/VideoApi $$FFMPEG_ROOT/include
 LIBS += $$FFMPEG_ROOT/lib/avcodec.lib \
     $$FFMPEG_ROOT/lib/avutil.lib \
     $$FFMPEG_ROOT/lib/swscale.lib
+win32:LIBS += dxgi.lib

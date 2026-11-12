@@ -1,4 +1,4 @@
-# 登录与延迟诊断（2.0.1）
+# 登录与延迟诊断（2.0.2）
 
 正常启动客户端即自动记录。当前用户的日志目录为
 `%APPDATA%\Audio-Video\diagnostics`，文件名含启动时间。
@@ -40,9 +40,26 @@
 诊断不记录手机号、密码、令牌、请求/响应正文、Authorization 头或聊天内容。
 `media_latency` 事件仅包含本次媒体 RTT，`-1` 表示没有有效样本。
 
+## 轨道发布超时与共享停滞
+
+`livekit_connect_started/succeeded`、`livekit_audio_track_publish_started/succeeded`
+分别记录连接和音频发布；`livekit_start_failed` 的 `phase` 区分失败阶段，
+并记录尝试次数及该阶段耗时。音频发布超时会清理旧连接，在 1 秒后重新连接一次；
+退出房间会取消待执行的重试。
+
+`livekit_video_track_publish_started/succeeded` 和 `livekit_track_publish_error`
+记录视频发布结果。视频发布超时最多尝试 3 次，每次失败结束后等待至少 1.5 秒；
+没有发布成功的源不接收编码帧。持续超时仍需结合服务端日志检查确认响应。
+
+共享状态中的“入队”表示 LiveKit 接受帧，不代表网络发送成功；
+`desktop_share_second` 的网络发送帧数与码率单独取自 SDK 统计。
+等待媒体连接时不会触发编码/发送停滞恢复。关键帧反馈请求现有编码器输出 IDR，
+不再每次重建编码器；分辨率、目标帧率和目标码率配置保持原设置。
+
 ## 验证
 
 运行 `tests/run-gateway-recovery.ps1` 检查模拟服务的超时、重试、取消、探测恢复和凭据脱敏；
 运行 `tests/run-network-recovery.ps1` 检查登录按钮恢复和界面指标来源。
+运行 `tests/run-h264-smoke.ps1 -RequireNvenc` 检查硬件编码、强制关键帧和晚加入解码。
 实际验收时保持相同分辨率、目标帧率和码率，比较相同操作下的媒体 RTT、丢包、
 采集/编码 FPS 以及阶段 P95。网关读数和媒体读数应分别比较，不能把指标切换当成性能提升。

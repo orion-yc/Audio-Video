@@ -39,6 +39,7 @@ public:
     bool encode(const QImage &image, int frameRate, int bitRate, bool desktopContent,
                 QByteArray *encoded, bool *isKeyFrame, QSize *encodedSize);
     void reset();
+    void requestKeyFrame();
     QString backendName() const;
 
 private:
@@ -59,6 +60,7 @@ private:
     bool m_desktopContent;
     qint64 m_nextPts;
     QString m_backendName;
+    bool m_forceKeyFrame = false;
 };
 
 class H264Decoder

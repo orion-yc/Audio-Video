@@ -19,6 +19,7 @@ public slots:
     void slot_encodeFrame(QImage image, int frameRate, int bitRate,
                           bool desktopContent, quint64 generation);
     void slot_reset();
+    void slot_requestKeyFrame();
 
 private:
     H264Encoder m_encoder;

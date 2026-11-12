@@ -38,3 +38,8 @@ void VideoEncodeThread::slot_reset()
 {
     m_encoder.reset();
 }
+
+void VideoEncodeThread::slot_requestKeyFrame()
+{
+    m_encoder.requestKeyFrame();
+}

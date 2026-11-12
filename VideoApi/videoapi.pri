@@ -6,6 +6,7 @@ HEADERS += \
     $$PWD/../include/VideoApi/video_common.h \
     $$PWD/../include/VideoApi/video_decode_worker.h \
     $$PWD/../include/VideoApi/rtc_session.h \
+    $$PWD/../include/VideoApi/track_publication_state.h \
     $$PWD/../include/VideoApi/video_encode_thread.h \
     $$PWD/../include/VideoApi/video_read.h
 
@@ -16,6 +17,7 @@ SOURCES += \
     $$PWD/../src/VideoApi/myfacedetect.cpp \
     $$PWD/../src/VideoApi/video_decode_worker.cpp \
     $$PWD/../src/VideoApi/rtc_session.cpp \
+    $$PWD/../src/VideoApi/track_publication_state.cpp \
     $$PWD/../src/VideoApi/video_encode_thread.cpp \
     $$PWD/../src/VideoApi/video_read.cpp
 

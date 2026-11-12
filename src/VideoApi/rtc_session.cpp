@@ -1,5 +1,6 @@
 #include "rtc_session.h"
 #include "diagnostics.h"
+#include "track_publication_state.h"
 #include <QThread>
 #include <QTimer>
 #include <QPointer>
@@ -24,6 +25,10 @@ struct SdkLifetime {
     SdkLifetime() { livekit::initialize(livekit::LogLevel::Warn); }
     ~SdkLifetime() { livekit::shutdown(); }
 };
+
+bool isPublicationTimeout(const QString &detail) {
+    return detail.contains("track publication timed out", Qt::CaseInsensitive);
+}
 
 double mediaRttMs(const livekit::SessionStats &stats) {
     double selectedRtt = -1.0;
@@ -74,7 +79,8 @@ struct RtcSession::Impl : livekit::RoomDelegate {
     quint64 lastStatsBytes = 0;
     quint64 lastStatsFrames = 0;
     qint64 lastStatsMs = 0;
-    qint64 nextTrackPublishAttemptMs = 0;
+    TrackPublicationState videoPublication;
+    std::atomic_bool starting {false};
     std::mutex framesMutex;
     struct Mailbox { QImage image; bool pending=false; };
     std::unordered_map<std::string,Mailbox> mailboxes;
@@ -199,15 +205,23 @@ struct RtcSession::Impl : livekit::RoomDelegate {
         statsTicks = 0;
         lastStatsBytes = lastStatsFrames = 0;
         lastStatsMs = 0;
-        nextTrackPublishAttemptMs = 0;
+        videoPublication.reset();
         if(room){room->setDelegate(nullptr);room->disconnect();}
         videoTrack.reset();video.reset();audioTrack.reset();audio.reset();room.reset();
         videoWidth=videoHeight=0;waitingForKeyframe=true;
+        starting = false;
         std::lock_guard<std::mutex> lock(framesMutex);mailboxes.clear();
     }
-    void begin(Config config,quint64 g) {
+    void begin(Config config,quint64 g,int attempt = 0) {
+        if(owner->m_generation.load()!=g)return;
         cleanup();generation=g;
         if(owner->m_generation.load()!=g)return;
+        starting = true;
+        QString phase = "connect";
+        QElapsedTimer phaseTimer;
+        phaseTimer.start();
+        DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_connect_started"),
+                                              {{QStringLiteral("attempt"), attempt + 1}});
         try {
             static SdkLifetime runtime;
             (void)runtime;
@@ -218,13 +232,42 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                 cleanup();report("Unable to connect to LiveKit");return;
             }
             if(owner->m_generation.load()!=g){cleanup();return;}
+            DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_connect_succeeded"),
+                                                  {{QStringLiteral("elapsed_ms"), phaseTimer.elapsed()}});
+            phase = "audio_publish";
+            phaseTimer.restart();
+            DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_audio_track_publish_started"),
+                                                  {{QStringLiteral("attempt"), attempt + 1}});
             audio=std::make_shared<livekit::AudioSource>(48000,1,0);
             if(auto lp=room->localParticipant().lock())audioTrack=lp->publishAudioTrack("meeting-audio",audio,livekit::TrackSource::SOURCE_MICROPHONE);
             if(!audioTrack)throw std::runtime_error("Unable to publish audio track");
+            if(owner->m_generation.load()!=g){cleanup();return;}
+            DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_audio_track_publish_succeeded"),
+                                                  {{QStringLiteral("elapsed_ms"), phaseTimer.elapsed()}});
             for(const auto &weak:room->remoteParticipants())if(auto p=weak.lock())participant(p.get());
             feedback->start();
+            starting = false;
             post([](RtcSession *o){o->setState(State::Connected,QStringLiteral("音视频已连接"));});
-        }catch(const std::exception &e){cleanup();report(e.what());}
+        }catch(const std::exception &e){
+            const QString detail = QString::fromUtf8(e.what());
+            DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_start_failed"),
+                {{QStringLiteral("phase"), phase}, {QStringLiteral("attempt"), attempt + 1},
+                 {QStringLiteral("elapsed_ms"), phaseTimer.elapsed()}, {QStringLiteral("detail"), detail}});
+            cleanup();
+            if(owner->m_generation.load()!=g)return;
+            if (phase == "audio_publish" && isPublicationTimeout(detail) && attempt == 0) {
+                post([](RtcSession *o) { o->setState(State::Connecting,
+                    QStringLiteral("音频轨道发布超时，正在重新建立媒体连接（第 2 次尝试）…")); });
+                QTimer::singleShot(1000, worker, [this, config, g, attempt] {
+                    if(owner->m_generation.load()==g)begin(config, g, attempt + 1);
+                });
+            } else {
+                const QString message = phase == "audio_publish"
+                    ? QStringLiteral("音频轨道发布失败，服务器未完成确认，请稍后重新加入房间。")
+                    : QStringLiteral("无法建立音视频连接，请检查网络或服务器后重新加入房间。");
+                report(message.toUtf8().constData());
+            }
+        }
     }
     void participant(livekit::RemoteParticipant *p) {
         if(!p)return;
@@ -280,25 +323,31 @@ struct RtcSession::Impl : livekit::RoomDelegate {
     }
     void onReconnecting(livekit::Room&,const livekit::ReconnectingEvent&) override {
         DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_reconnecting"));
-        post([](RtcSession *o){o->setState(State::Reconnecting,QStringLiteral("正在恢复音视频连接…"));});
+        if (!starting) post([](RtcSession *o){o->setState(State::Reconnecting,QStringLiteral("正在恢复音视频连接…"));});
     }
     void onReconnected(livekit::Room&,const livekit::ReconnectedEvent&) override {
         DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_reconnected"));
-        post([](RtcSession *o){o->setState(State::Connected,QStringLiteral("音视频连接已恢复"));Q_EMIT o->SIG_keyframeRequested();});
+        if (!starting) post([](RtcSession *o){o->setState(State::Connected,QStringLiteral("音视频连接已恢复"));Q_EMIT o->SIG_keyframeRequested();});
     }
     void onDisconnected(livekit::Room&,const livekit::DisconnectedEvent&) override {
         DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_disconnected"));
-        post([](RtcSession *o){o->setState(State::Failed,QStringLiteral("音视频连接已断开，请重新加入房间"));});
+        if (!starting) post([](RtcSession *o){o->setState(State::Failed,QStringLiteral("音视频连接已断开，请重新加入房间"));});
     }
     void capture(QByteArray data,bool key,int w,int h,int fps,int bitrate,bool screen,quint64 g) {
         struct Pending {RtcSession *o;~Pending(){o->m_videoPending=false;}} pending{owner};
         if(g!=generation||owner->m_generation.load()!=g||!room)return;
         try {
             auto lp=room->localParticipant().lock();if(!lp)return;
-            const bool encodingLayoutChanged = !video || w!=videoWidth || h!=videoHeight
+            const bool encodingLayoutChanged = w!=videoWidth || h!=videoHeight
                     || screen!=videoScreen || fps!=videoFps;
             const bool cameraBitrateChanged = !screen && bitrate != videoBitrate;
-            if(encodingLayoutChanged || cameraBitrateChanged){
+            if(encodingLayoutChanged || cameraBitrateChanged)videoPublication.reset();
+            if(!videoPublication.ready()){
+                // Check backoff before constructing a source/track. A constructed track is not a publication.
+                if (!videoPublication.beginAttempt(QDateTime::currentMSecsSinceEpoch())) {
+                    DiagnosticLogger::instance().recordDroppedFrame(QStringLiteral("video_publish_backoff"));
+                    return;
+                }
                 if(videoTrack)lp->unpublishTrack(videoTrack->sid());
                 videoTrack.reset();video.reset();waitingForKeyframe=true;
                 videoWidth=w;videoHeight=h;videoScreen=screen;videoFps=fps;videoBitrate=bitrate;
@@ -308,17 +357,24 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                 opts.video_encoder=livekit::VideoEncoderBackend::PreEncoded;
                 opts.simulcast=false;opts.source=screen?livekit::TrackSource::SOURCE_SCREENSHARE:livekit::TrackSource::SOURCE_CAMERA;
                 opts.video_encoding=livekit::VideoEncodingOptions{static_cast<std::uint64_t>(bitrate),static_cast<double>(fps)};
-                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                if (nowMs < nextTrackPublishAttemptMs) {
-                    return;
-                }
+                QElapsedTimer publishTimer;
+                publishTimer.start();
+                DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_video_track_publish_started"),
+                    {{QStringLiteral("attempt"), videoPublication.attempts()},
+                     {QStringLiteral("width"), w}, {QStringLiteral("height"), h},
+                     {QStringLiteral("fps"), fps}, {QStringLiteral("bitrate_bps"), bitrate}});
                 try {
                     lp->publishTrack(videoTrack,opts);
-                    nextTrackPublishAttemptMs = 0;
+                    videoPublication.succeeded();
                 } catch (const std::exception &e) {
+                    const QString detail = QString::fromUtf8(e.what());
+                    videoPublication.failed(QDateTime::currentMSecsSinceEpoch());
                     DiagnosticLogger::instance().logEvent(
                                 QStringLiteral("livekit_track_publish_error"),
-                                {{QStringLiteral("detail"), QString::fromUtf8(e.what())},
+                                {{QStringLiteral("detail"), detail},
+                                 {QStringLiteral("phase"), QStringLiteral("video_publish")},
+                                 {QStringLiteral("attempt"), videoPublication.attempts()},
+                                 {QStringLiteral("elapsed_ms"), publishTimer.elapsed()},
                                  {QStringLiteral("width"), w},
                                  {QStringLiteral("height"), h},
                                  {QStringLiteral("fps"), fps},
@@ -326,16 +382,27 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                     videoTrack.reset();
                     video.reset();
                     waitingForKeyframe = true;
-                    nextTrackPublishAttemptMs = nowMs + 1000;
-                    post([](RtcSession *o){Q_EMIT o->SIG_keyframeRequested();});
+                    if (g != owner->m_generation.load()) return;
+                    if (isPublicationTimeout(detail) && !videoPublication.exhausted()) {
+                        post([](RtcSession *o){
+                            Q_EMIT o->SIG_publicationStatus(QStringLiteral("视频轨道发布超时，正在等待重试…"));
+                            Q_EMIT o->SIG_keyframeRequested();
+                        });
+                    } else {
+                        report("视频轨道发布失败，服务器未完成确认，请稍后重新加入房间。");
+                    }
                     return;
                 }
-                DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_video_track_publish_requested"),
-                                                      {{QStringLiteral("width"), w},
+                if (g != owner->m_generation.load()) return;
+                DiagnosticLogger::instance().logEvent(QStringLiteral("livekit_video_track_publish_succeeded"),
+                                                      {{QStringLiteral("elapsed_ms"), publishTimer.elapsed()},
+                                                       {QStringLiteral("width"), w},
                                                        {QStringLiteral("height"), h},
                                                        {QStringLiteral("fps"), fps},
                                                        {QStringLiteral("bitrate_bps"), bitrate}});
+                post([](RtcSession *o){Q_EMIT o->SIG_publicationStatus(QStringLiteral("视频轨道已发布"));});
             }
+            if (!videoPublication.ready() || !videoTrack || !video) return;
             if(waitingForKeyframe&&!key){post([](RtcSession *o){Q_EMIT o->SIG_keyframeRequested();});return;}
             livekit::EncodedVideoSource::Frame frame;frame.is_keyframe=key;frame.width=w;frame.height=h;
             frame.data.assign(reinterpret_cast<const std::uint8_t*>(data.constData()),reinterpret_cast<const std::uint8_t*>(data.constData())+data.size());
@@ -346,7 +413,7 @@ struct RtcSession::Impl : livekit::RoomDelegate {
                 DiagnosticLogger::instance().recordLiveKitQueued(
                             queueTimer.nsecsElapsed() / 1000, data.size(),
                             owner->m_videoPending.load() ? 1 : 0);
-                post([](RtcSession *o){Q_EMIT o->SIG_videoSent();});
+                post([](RtcSession *o){Q_EMIT o->SIG_videoQueued();});
             }
             else{
                 DiagnosticLogger::instance().recordDroppedFrame(QStringLiteral("livekit_queue_rejected"));
@@ -391,4 +458,5 @@ void RtcSession::stopVideo(){const quint64 g=m_generation.load();QMetaObject::in
     if(impl->generation!=g)return;
     try{if(impl->room&&impl->videoTrack)if(auto lp=impl->room->localParticipant().lock())lp->unpublishTrack(impl->videoTrack->sid());}catch(const std::exception &e){impl->report(e.what());}
     impl->videoTrack.reset();impl->video.reset();impl->waitingForKeyframe=true;
+    impl->videoPublication.reset();
 },Qt::QueuedConnection);}

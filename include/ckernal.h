@@ -90,6 +90,7 @@ signals:
     void SIG_encodeVideoFrame(QImage image, int frameRate, int bitRate,
                               bool desktopContent, quint64 generation);
     void SIG_resetVideoEncoder();
+    void SIG_requestVideoKeyframe();
 public:
     static CKernal* getInstance()
     {
@@ -262,7 +263,8 @@ private:
     bool m_webRegistrationPending = false;
     bool m_webAvatarChanged = false;
     QByteArray m_webAvatar;
-    std::atomic<quint64> m_webSentFrames {0};
+    std::atomic<quint64> m_webQueuedFrames {0};
+    QElapsedTimer m_webKeyframeClock;
     int m_webTargetBitrate = 0;
     QElapsedTimer m_webBitrateClock;
     PFUN                            m_netMap[DEF_PACK_COUNT];

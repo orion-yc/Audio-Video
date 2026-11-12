@@ -99,7 +99,7 @@ void CKernal::setupWebRtc() {
         }
         if(state==RtcSession::State::Connected){
             if(!m_roomid)slot_setJoinedRoom(1); // A local active-room marker; the actual room ID remains a QString.
-            Q_EMIT SIG_resetVideoEncoder();
+            Q_EMIT SIG_requestVideoKeyframe();
         }else if(state==RtcSession::State::Failed){
             if(m_roomid)slot_quitRoom();else {m_gateway->leaveRoom();m_webRoomName.clear();m_rtc->stop();clearRoomRequest();m_demoDialog->slot_setPushButton_enable(true);}
             QMessageBox::warning(m_demoDialog,QStringLiteral("音视频连接"),detail);
@@ -115,7 +115,12 @@ void CKernal::setupWebRtc() {
         if(!m_roomid)return;const int id=userId(identity);if(!id)return;ensureRemoteParticipant(id);
         const auto it=m_mapIDToAudioWrite.find(id);if(it!=m_mapIDToAudioWrite.end())it->second->slot_pcm_rx(pcm);
     });
-    connect(m_rtc,&RtcSession::SIG_keyframeRequested,this,[this]{if(m_activeVideoSource!=VideoSource::None)Q_EMIT SIG_resetVideoEncoder();});
+    connect(m_rtc,&RtcSession::SIG_keyframeRequested,this,[this]{
+        if(m_activeVideoSource==VideoSource::None)return;
+        if(m_webKeyframeClock.isValid() && m_webKeyframeClock.elapsed()<500)return;
+        m_webKeyframeClock.restart();
+        Q_EMIT SIG_requestVideoKeyframe();
+    });
     connect(m_rtc,&RtcSession::SIG_bitrateRequested,this,[this](int rate){
         if(m_webBitrateClock.isValid()&&m_webBitrateClock.elapsed()<1000)return;
         const int capped=qBound(250000,rate,72000000);
@@ -127,7 +132,8 @@ void CKernal::setupWebRtc() {
                                                {QStringLiteral("desktop"), m_activeVideoSource == VideoSource::Desktop}});
         if(m_webTargetBitrate==0||qAbs(effective-m_webTargetBitrate)>m_webTargetBitrate/5){m_webTargetBitrate=effective;m_webBitrateClock.restart();}
     });
-    connect(m_rtc,&RtcSession::SIG_videoSent,this,[this]{if(m_activeVideoSource==VideoSource::Desktop)++m_webSentFrames;});
+    connect(m_rtc,&RtcSession::SIG_videoQueued,this,[this]{if(m_activeVideoSource==VideoSource::Desktop)++m_webQueuedFrames;});
+    connect(m_rtc,&RtcSession::SIG_publicationStatus,m_roomDialog,&RoomDialog::slot_setMediaStatus);
 }
 void CKernal::webLogin(const QString &phone,const QString &password){
     if(m_loginPending)return;

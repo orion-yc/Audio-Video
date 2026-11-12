@@ -6,6 +6,8 @@ TARGET = webrtc_integration
 SOURCES += webrtc_integration.cpp ../src/netapi/gateway/gateway_client.cpp ../src/VideoApi/rtc_session.cpp
 HEADERS += ../include/netapi/gateway/gateway_client.h ../include/VideoApi/rtc_session.h ../include/diagnostics.h
 SOURCES += ../src/diagnostics.cpp
+SOURCES += ../src/VideoApi/track_publication_state.cpp
+HEADERS += ../include/VideoApi/track_publication_state.h
 INCLUDEPATH += ../include ../include/netapi/gateway ../include/VideoApi
 isEmpty(LIVEKIT_SDK_ROOT): error("Pass LIVEKIT_SDK_ROOT for the pinned SDK 1.13.0")
 INCLUDEPATH += $$LIVEKIT_SDK_ROOT/include

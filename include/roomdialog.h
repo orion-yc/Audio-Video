@@ -68,7 +68,7 @@ public slots:
     void slot_setDesktopShareRuntimeStats(int width, int height, int targetFrameRate,
                                           int bitRate, const QString &encoderName,
                                           int capturedFrames, int encodedFrames,
-                                          int sentFrames, int droppedFrames);
+                                            int sentFrames, int droppedFrames, bool liveKitQueued = false);
     void slot_clearDesktopShareStatus();
     void slot_appendChatMessage(int userId, const QString &name, const QString &message,
                                 bool ownMessage);

@@ -35,7 +35,8 @@ signals:
     void SIG_remoteAudio(QString participantIdentity, QByteArray pcm);
     void SIG_keyframeRequested();
     void SIG_bitrateRequested(int bitrate);
-    void SIG_videoSent();
+    void SIG_videoQueued();
+    void SIG_publicationStatus(QString detail);
     void SIG_statsUpdated(double fps, double bitrate, double packetLoss, double jitterMs, double rttMs);
     void SIG_latencyMeasured(int ms);
 private:

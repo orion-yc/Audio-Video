@@ -314,7 +314,7 @@ void RoomDialog::slot_setDesktopShareRuntimeStats(int width, int height,
                                                    int targetFrameRate, int bitRate,
                                                    const QString &encoderName,
                                                    int capturedFrames, int encodedFrames,
-                                                   int sentFrames, int droppedFrames)
+                                                   int sentFrames, int droppedFrames, bool liveKitQueued)
 {
     QString encoder = "H.264";
     if (encoderName == "h264_nvenc") {
@@ -327,11 +327,13 @@ void RoomDialog::slot_setDesktopShareRuntimeStats(int width, int height,
 
     const int megaBits = qMax(1, bitRate / 1000000);
     setDesktopShareStatusText(
-                QString("共享 %1x%2 | 目标 %3 FPS / %4 Mbps | 实际 采集 %5 编码 %6 发送 %7 FPS | 丢帧 %8 | %9")
+                QString("共享 %1x%2 | 目标 %3 FPS / %4 Mbps | 实际 采集 %5 编码 %6 %10 %7 FPS | 丢帧 %8 | %9")
                 .arg(width).arg(height).arg(targetFrameRate).arg(megaBits)
                 .arg(capturedFrames).arg(encodedFrames).arg(sentFrames)
-                .arg(droppedFrames).arg(encoder),
-                "实际 FPS 每秒更新：采集为送入编码器的画面数；编码为 H.264 输出数；发送为写入视频连接的帧数；丢帧表示为保持低延迟而替换或放弃的旧画面。");
+                .arg(droppedFrames).arg(encoder).arg(liveKitQueued ? "入队" : "写入"),
+                liveKitQueued
+                    ? "入队表示 LiveKit 接受的帧数；网络实际发送帧数、码率和丢包另见诊断日志。入队成功不等于网络发送成功。"
+                    : "实际 FPS 每秒更新：采集为采集帧数；编码为 H.264 输出数；写入为本地视频连接接受的帧数，不代表远端已收到。");
 }
 
 void RoomDialog::slot_clearDesktopShareStatus()

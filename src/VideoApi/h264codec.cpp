@@ -57,6 +57,11 @@ QString H264Encoder::backendName() const
     return m_backendName;
 }
 
+void H264Encoder::requestKeyFrame()
+{
+    m_forceKeyFrame = true;
+}
+
 void H264Encoder::reset()
 {
     if (m_packet) {
@@ -78,6 +83,7 @@ void H264Encoder::reset()
     m_desktopContent = false;
     m_nextPts = 0;
     m_backendName.clear();
+    m_forceKeyFrame = false;
 }
 
 bool H264Encoder::openEncoder(const char *encoderName, const QImage &image,
@@ -259,6 +265,7 @@ bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,
     sws_scale(m_scaler, sourceData, sourceStride, 0, rgb.height(),
               m_frame->data, m_frame->linesize);
     m_frame->pts = m_nextPts++;
+    m_frame->pict_type = m_forceKeyFrame ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
 
     encoded->clear();
     *isKeyFrame = false;
@@ -316,6 +323,7 @@ bool H264Encoder::encode(const QImage &image, int frameRate, int bitRate,
         return false;
     }
 
+    m_forceKeyFrame = false;
     const int receiveResult = receivePackets();
     if (receiveResult < 0) {
         qWarning().noquote() << "Unable to read H.264 packet:" << ffmpegError(receiveResult);

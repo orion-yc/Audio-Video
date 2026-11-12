@@ -27,9 +27,20 @@ JWTs are never truncated into the old 33-byte TCP token field.
 `RtcSession` uses the official native C++ SDK 1.13.0 (pinned hash in the installer). SDK calls,
 publication and capture run on a worker thread. Existing H.264 access units are published
 through EncodedVideoSource; no second H.264 encoder is introduced. Video feedback requests
-keyframes and provides encoder bitrate targets. The source is republished when the chosen
-resolution/frame rate/bitrate/source changes. Outbound encoded video is bounded to one
+keyframes and provides encoder bitrate targets. Keyframe feedback requests an IDR from
+the existing encoder, with repeated feedback coalesced; it does not recreate the encoder.
+The source is republished when resolution/frame rate/source changes (or camera bitrate
+changes). Desktop bitrate feedback updates the encoder without republishing the track.
+Outbound encoded video is bounded to one
 pending capture, and incoming video uses a latest-frame mailbox per participant.
+
+Startup audio publication timeouts retry once with a fresh room connection. Video
+publication timeouts allow three attempts with a 1.5-second backoff measured from the
+end of the failed attempt. Frames enter the source only after successful publication.
+Generation checks cancel stale startup retries after leaving or changing rooms.
+Diagnostic events separate connection, audio publication and video publication phases.
+The desktop status labels SDK-accepted frames as queued; actual network bytes/frames
+remain separate in diagnostic statistics. The desktop watchdog waits for media readiness.
 
 Microphone and WASAPI loopback are mixed as 48 kHz mono PCM. Twenty-millisecond mixer
 frames are split into two ten-millisecond submissions to the low-latency native source.
@@ -58,10 +69,14 @@ The smoke test covers registration/login, profile, JPEG upload/fetch, bidirectio
 chat, and a late subscriber decoding H.264 video and receiving Opus audio. It uses a small
 synthetic IDR fixture, not real Windows desktop capture or a 4K performance benchmark.
 
-Windows/MSVC packaging, Windows microphone/camera/WASAPI devices, real two-machine
-network interruption and 4K/60 fps/72 Mbps are still untested in this Linux environment.
+Windows/MSVC release packaging and local network-recovery regression tests pass for 2.0.2.
+The Windows H.264 smoke test verifies forced keyframes and late-join decoding with NVENC
+at 2560×1440/60 fps. Real two-machine network interruption, server publication-timeout
+fault injection, and 4K/60 fps/72 Mbps still require live validation.
 
-Build on Windows with `packaging/build-release-msvc.ps1 -Version 2.0.1`.
+Build on Windows with `packaging/build-release-msvc.ps1 -Version 2.0.2`.
+Run `tests/run-network-recovery.ps1` and `tests/run-h264-smoke.ps1 -RequireNvenc`
+for local recovery/queue-counting and hardware keyframe regressions.
 Run `tests/run-webrtc-integration.ps1` for native integration. It generates temporary users;
 use its JSON report to clean only those accounts and their avatar metadata/files.
 

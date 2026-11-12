@@ -25,8 +25,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [2/3] Building and packaging Audio-Video 2.0.1...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\build-release-msvc.ps1" -Version 2.0.1
+echo [2/3] Building and packaging Audio-Video 2.0.2...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\build-release-msvc.ps1" -Version 2.0.2
 if errorlevel 1 (
     echo Build or packaging failed.
     pause
@@ -34,7 +34,7 @@ if errorlevel 1 (
 )
 
 echo [3/3] Completed successfully.
-echo Installer: %~dp0dist\MSVC\Audio-Video-MSVC-Setup-2.0.1.exe
-echo Portable : %~dp0dist\MSVC\Audio-Video-MSVC-Portable-2.0.1.zip
+echo Installer: %~dp0dist\MSVC\Audio-Video-MSVC-Setup-2.0.2.exe
+echo Portable : %~dp0dist\MSVC\Audio-Video-MSVC-Portable-2.0.2.zip
 pause
 exit /b 0
